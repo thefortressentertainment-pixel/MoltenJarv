@@ -8,6 +8,7 @@ import { buildMemory, type Memory } from '../memory/index.js';
 import { loadExternalMcpTools } from '../mcp/client.js';
 import { ModelRouter } from '../providers/index.js';
 import { fileTools } from '../tools/filesystem.js';
+import { computerTools } from '../tools/computer.js';
 import { memoryTools } from '../tools/memory.js';
 import { speechTools } from '../tools/speech.js';
 import { ToolRegistry } from '../tools/registry.js';
@@ -31,7 +32,7 @@ export async function buildAgent(): Promise<AgentContext> {
   const memory = buildMemory(config);
 
   const registry = new ToolRegistry();
-  registry.registerMany([...timeTools(), ...fileTools(), ...memoryTools(), ...webTools(), ...speechTools()]);
+  registry.registerMany([...timeTools(), ...fileTools(), ...memoryTools(), ...webTools(), ...speechTools(), ...computerTools()]);
 
   const { tools: externalTools, errors: externalErrors } = await loadExternalMcpTools(config.mcp.servers);
   registry.registerMany(externalTools);
@@ -163,6 +164,9 @@ export async function runDoctor(ctx: AgentContext): Promise<void> {
   process.stdout.write(
     `[${voice.hasWhisperCli() && voice.locateWhisperModel() ? 'OK' : '--'}] stt: ${voice.voiceStatus.stt}\n`,
   );
+
+  const computer = await import('../computer/index.js');
+  process.stdout.write(`[${computer.computerStatus(config).implemented ? 'OK' : '--'}] computer: ${computer.computerStatus(config).note}\n`);
 
   for (const err of externalErrors) process.stdout.write(`[FAIL] external mcp: ${err}\n`);
 }

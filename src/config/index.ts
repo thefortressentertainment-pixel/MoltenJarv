@@ -35,6 +35,11 @@ export interface JarvGenieConfig {
   mcp: {
     servers: McpServerConfig[];
   };
+  computer?: {
+    allowControl?: boolean;
+    visionModel?: string;
+    visionEndpoint?: string;
+  };
 }
 
 const DEFAULT_SYSTEM_PROMPT = `You are Jarv Genie, a personal AI assistant running on the user's own devices. You act like a capable, concise companion: proactive, precise, and respectful of the user's time and privacy.

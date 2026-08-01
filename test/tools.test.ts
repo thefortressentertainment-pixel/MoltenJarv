@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { timeTools } from '../src/tools/time.js';
 import { fileTools } from '../src/tools/filesystem.js';
 import { memoryTools } from '../src/tools/memory.js';
+import { computerTools } from '../src/tools/computer.js';
 import { ToolRegistry } from '../src/tools/registry.js';
 import type { ToolContext } from '../src/agent/types.js';
 
@@ -91,4 +92,24 @@ test('memoryTools and registry round-trip', async () => {
 
   const missing = await registry.execute('nope', {}, ctx);
   assert.strictEqual(missing.ok, false);
+});
+
+test('computerTools gate control actions behind allowControl', async () => {
+  const tools = computerTools();
+  const as = tools.find((t) => t.name === 'run_apple_script')!;
+  assert.ok(as);
+
+  const locked = await as.handler({ script: 'say "hi"' }, makeContext('/tmp'));
+  assert.strictEqual(locked.ok, false);
+  assert.match(locked.error, /approval required/);
+
+  const cfg = { computer: { allowControl: true } };
+  const ctx = { workdir: '/tmp', config: cfg } as unknown as ToolContext;
+  const result = await as.handler({ script: '1 + 1' }, ctx);
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.output.trim(), '2');
+
+  const app = tools.find((t) => t.name === 'open_app')!;
+  const opened = await app.handler({ app: 'Calculator' }, makeContext('/tmp'));
+  assert.strictEqual(opened.ok, true);
 });
