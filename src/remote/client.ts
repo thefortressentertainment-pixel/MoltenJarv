@@ -75,6 +75,10 @@ export class RemoteClient {
     private token: string,
   ) {}
 
+  get baseUrl(): string {
+    return this.url;
+  }
+
   private async req<T>(method: string, route: string, body?: unknown): Promise<T> {
     const res = await fetch(`${this.url}${route}`, {
       method,
@@ -178,5 +182,36 @@ export class RemoteClient {
 
   setModel(model: string): Promise<{ model: string }> {
     return this.req('POST', '/api/model', { model });
+  }
+
+  register(payload: { name: string; platform: string; capabilities?: string[] }): Promise<{ device: { id: string; name: string } }> {
+    return this.req('POST', '/api/devices/register', payload);
+  }
+
+  listDevices(): Promise<{ devices: Array<{ id: string; name: string; platform: string; lastSeen: number }> }> {
+    return this.req('GET', '/api/devices');
+  }
+
+  /** Long-poll for the next pushed event for this device; null on timeout. */
+  async waitEvent(deviceId: string, timeoutSeconds = 25): Promise<{ event: { kind: string; text: string } | null }> {
+    const res = await fetch(`${this.url}/api/devices/${encodeURIComponent(deviceId)}/events?timeout=${timeoutSeconds}`, {
+      headers: { Authorization: `Bearer ${this.token}` },
+      signal: AbortSignal.timeout(timeoutSeconds * 1000 + 5000),
+    });
+    if (!res.ok) {
+      let message = `HTTP ${res.status}`;
+      try {
+        const data = (await res.json()) as { error?: string };
+        message = data.error || message;
+      } catch {
+        // keep status fallback
+      }
+      throw new Error(message);
+    }
+    return (await res.json()) as { event: { kind: string; text: string } | null };
+  }
+
+  notify(payload: { text: string; device?: string; speak?: boolean }): Promise<{ enqueued: number }> {
+    return this.req('POST', '/api/notify', payload);
   }
 }

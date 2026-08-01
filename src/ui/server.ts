@@ -1,11 +1,13 @@
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
+import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { SESSION, type AgentContext } from '../cli/index.js';
 import { VERSION } from '../config/defaults.js';
 import { getTokenStore, type TokenStore } from '../hub/auth.js';
+import { DeviceStore, pushNotify } from '../sidecar/devices.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS = new Set(['index.html', 'app.css', 'app.js']);
@@ -19,6 +21,8 @@ export interface UiServerOptions {
   auth?: boolean;
   /** Token store used when auth is on. Default: the real ~/.jarv-genie store. */
   tokenStore?: TokenStore;
+  /** Device registry + push queue. Default: the real ~/.jarv-genie store. */
+  deviceStore?: DeviceStore;
 }
 
 function requireAuth(host: string, opts: UiServerOptions): boolean {
@@ -28,6 +32,50 @@ function requireAuth(host: string, opts: UiServerOptions): boolean {
 function handler(ctx: AgentContext, opts: UiServerOptions, host: string) {
   const guard = requireAuth(host, opts);
   const tokenStore = guard ? (opts.tokenStore ?? getTokenStore()) : null;
+  const devices = opts.deviceStore ?? new DeviceStore();
+
+  const deviceRoutes = async (req: http.IncomingMessage, res: http.ServerResponse, route: string): Promise<boolean> => {
+    if (req.method === 'GET' && route === '/api/devices') {
+      json(res, 200, { devices: devices.list() });
+      return true;
+    }
+    if (req.method === 'POST' && route === '/api/devices/register') {
+      const body = await readJson(req);
+      const name = String(body.name ?? '').trim() || `device-${Date.now().toString(36)}`;
+      const capabilities = Array.isArray(body.capabilities) ? body.capabilities.map(String) : [];
+      const device = devices.register(name, String(body.platform ?? os.platform()), capabilities);
+      json(res, 200, { device });
+      return true;
+    }
+    if (req.method === 'POST' && route === '/api/notify') {
+      const body = await readJson(req);
+      const text = String(body.text ?? '').trim();
+      if (!text) {
+        json(res, 400, { error: 'text is required' });
+        return true;
+      }
+      const enqueued = pushNotify(devices, text, {
+        device: String(body.device ?? '').trim() || undefined,
+        speak: body.speak === true,
+      });
+      json(res, 200, { enqueued: enqueued.length });
+      return true;
+    }
+    const m = route.match(/^\/api\/devices\/([^/]+)\/events$/);
+    if (req.method === 'GET' && m) {
+      const deviceId = decodeURIComponent(m[1] ?? '');
+      const timeout = Math.min(Math.max(Number(new URL(req.url ?? '/', 'http://localhost').searchParams.get('timeout') ?? 25), 1), 55);
+      const existing = devices.dequeue(deviceId);
+      if (existing) {
+        json(res, 200, { event: existing });
+        return true;
+      }
+      await devices.waitFor(deviceId, timeout * 1000);
+      json(res, 200, { event: devices.dequeue(deviceId) });
+      return true;
+    }
+    return false;
+  };
 
   return async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
     try {
@@ -53,6 +101,8 @@ function handler(ctx: AgentContext, opts: UiServerOptions, host: string) {
           return json(res, 401, { error: 'unauthorized: provide a hub token (see jarv-genie link)' });
         }
       }
+
+      if (await deviceRoutes(req, res, route)) return;
 
       if (req.method === 'GET' && route === '/api/status') return json(res, 200, await status(ctx));
       if (req.method === 'GET' && route === '/api/session') return json(res, 200, await loadSession(ctx));

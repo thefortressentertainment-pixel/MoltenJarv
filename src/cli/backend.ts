@@ -26,6 +26,8 @@ export interface ChatBackend {
   setModel(model: string): Promise<string>;
   listTools(): Promise<Array<{ name: string; description: string }>>;
   memorySummary(): Promise<MemorySummary>;
+  /** Best-effort push to device sidecars through the hub. Optional. */
+  push?(text: string, opts: { speak?: boolean }): Promise<void>;
 }
 
 export function localBackend(ctx: AgentContext): ChatBackend {
@@ -106,6 +108,13 @@ export function remoteBackend(client: RemoteClient): ChatBackend {
     async memorySummary() {
       const s = await client.status();
       return { count: s.facts, samples: [] };
+    },
+    async push(text, opts) {
+      try {
+        await client.notify({ text, speak: opts.speak });
+      } catch {
+        // best effort — devices may be offline
+      }
     },
   };
 }

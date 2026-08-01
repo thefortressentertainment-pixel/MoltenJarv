@@ -10,6 +10,7 @@ import {
 } from './cli/agent.js';
 import { localBackend, remoteBackend } from './cli/backend.js';
 import { runKeyCommand } from './cli/keys.js';
+import { runSidecar, sendNotify } from './cli/sidecar.js';
 import { runVoiceSession, runWakeSession, type VoiceSessionOptions } from './cli/voice.js';
 import { installPiper } from './voice/index.js';
 import { ensureConfigFile } from './config/index.js';
@@ -38,6 +39,8 @@ Usage:
   jarv-genie hub --token          print the hub token
   jarv-genie link <url> <token>   pair this machine to a hub (token via hub --token)
   jarv-genie unlink               forget the hub
+  jarv-genie sidecar [--name X] [--speak] [--no-notify] [--remote]   connect a device to the hub
+  jarv-genie notify "text" [--device NAME] [--speak] [--remote]   push to connected devices
   jarv-genie voice [--voice N] [--no-tts] [--remote] [--live] [--wake [--wake-phrase "..."] [--quiet]] [--setup-piper]   talk to the brain out loud
   jarv-genie voice --live   show live captions as you speak (streaming STT)
   jarv-genie voice --wake   hands-free: answers when you say "hey jarv" (wake word)
@@ -189,6 +192,33 @@ async function main(): Promise<void> {
   if (raw[0] === 'unlink') {
     getLinkStore().clear();
     process.stdout.write('Unlinked.\n');
+    return;
+  }
+
+  if (raw[0] === 'sidecar') {
+    const rest = raw.slice(1);
+    const remoteUrl = extractRemote(rest);
+    const client = remoteUrl !== undefined ? resolveRemote(remoteUrl) : resolveRemote('');
+    const opts = {
+      name: rest.find((a, i) => rest[i - 1] === '--name'),
+      speak: rest.includes('--speak'),
+      notify: !rest.includes('--no-notify'),
+    };
+    await runSidecar(client, opts);
+    return;
+  }
+
+  if (raw[0] === 'notify') {
+    const rest = raw.slice(1);
+    const remoteUrl = extractRemote(rest);
+    const text = rest.filter((a) => !a.startsWith('-')).join(' ');
+    if (!text) {
+      process.stderr.write('Usage: jarv-genie notify "<text>" [--device NAME] [--speak] [--remote]\n');
+      process.exit(1);
+    }
+    const client = remoteUrl !== undefined ? resolveRemote(remoteUrl) : resolveRemote('');
+    const device = rest.find((a, i) => rest[i - 1] === '--device');
+    await sendNotify(client, text, { device, speak: rest.includes('--speak') });
     return;
   }
 

@@ -64,9 +64,12 @@ sub-second, private. Shipped (`jarv-genie voice`):
 - [x] `open_app` (launch any app)
 - [x] Scoped control with explicit approval: `run_apple_script`
       (System Events / Accessibility) gated behind `computer.allowControl`
-- [ ] Device sidecars: a lightweight daemon on each device connecting back to
-      one hub over an authenticated channel (the `--remote`/`voice --remote`
-      channel is the current stand-in)
+- [x] Device sidecars: `jarv-genie sidecar` runs on any device, registers with
+      the hub over the authenticated channel, and long-polls for pushed events
+      (notifications / spoken replies). `jarv-genie notify "<text>"` fans out to
+      connected devices; the scheduled agent pushes deliveries to sidecars too.
+      Pending events persist in `~/.jarv-genie/events.json` until a device
+      connects (nothing is lost while a device is offline).
 - [ ] Delegate GUI work to a computer-use model where no API exists
 
 ## v4 — Proactive & scheduled
@@ -76,7 +79,9 @@ sub-second, private. Shipped (`jarv-genie voice`):
 - [x] Deliveries: macOS notifications, spoken replies, stdout
 - [x] `agent schedule / list / run / once / remove`
 - [ ] Long-horizon monitors (watch a directory, a web page, a metric)
-- [ ] Notifications through multiple channels (terminal, push to phone)
+- [x] Notifications through multiple channels — device sidecars (`jarv-genie
+      sidecar`) deliver pushes to any machine; `jarv-genie notify` fans out; the
+      agent daemon pushes deliveries to sidecars when running with `--remote`
 
 ## v5 — Learning
 

@@ -45,7 +45,7 @@ export async function runAgentSchedule(cfg: AgentConfig, backend: ChatBackend): 
     process.stdout.write(`[jarv-genie] running ${s.id}${missed ? ' (missed)' : ''}: ${s.prompt}\n`);
     try {
       const result = await backend.chat(s.prompt);
-      await deliver(result.text || '(no response)', s, cfg);
+      await deliver(result.text || '(no response)', s, cfg, backend);
     } catch (err) {
       process.stdout.write(`[jarv-genie] ${s.id} failed: ${err instanceof Error ? err.message : String(err)}\n`);
     }
@@ -53,10 +53,13 @@ export async function runAgentSchedule(cfg: AgentConfig, backend: ChatBackend): 
   if (done.length > 0) saveAgentState(state);
 }
 
-async function deliver(text: string, s: { notify?: boolean; speak?: boolean }, cfg: AgentConfig): Promise<void> {
+async function deliver(text: string, s: { notify?: boolean; speak?: boolean }, cfg: AgentConfig, backend: ChatBackend): Promise<void> {
   process.stdout.write(`\n[jarv] ${text}\n`);
   if (s.notify ?? cfg.notifications) notify(text);
   if (s.speak ?? cfg.speak) await ttsSpeak(text);
+  if (backend.push && ((s.notify ?? cfg.notifications) || (s.speak ?? cfg.speak))) {
+    await backend.push(text, { speak: !!(s.speak ?? cfg.speak) });
+  }
 }
 
 export function printSchedules(cfg: AgentConfig): void {
@@ -100,7 +103,7 @@ export async function runScheduleNow(id: string, backend: ChatBackend): Promise<
     return;
   }
   const result = await backend.chat(s.prompt);
-  await deliver(result.text || '(no response)', s, cfg);
+  await deliver(result.text || '(no response)', s, cfg, backend);
 }
 
 export async function runAdHoc(

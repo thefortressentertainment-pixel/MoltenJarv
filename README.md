@@ -182,6 +182,29 @@ jarv-genie agent             # run the daemon (fires missed runs after sleep)
 Schedules live in `~/.jarv-genie/agent.json`; missed runs (e.g. the Mac was
 asleep) fire once on wake.
 
+### Device sidecars — push to any machine
+
+A sidecar connects a device to the hub and listens for pushes, so Jarv Genie can
+reach you anywhere, not just on the hub machine:
+
+```bash
+# on the hub machine (the brain already runs as a hub):
+jarv-genie hub --host 0.0.0.0 --port 3001
+
+# on each device you want to reach (same network or Tailscale):
+jarv-genie link http://<hub>:3001 <token>
+jarv-genie sidecar --speak      # keep it running; delivers pushes on this device
+
+# from anywhere, push a message to connected devices:
+jarv-genie notify "Stand up and stretch" --device imac --speak
+```
+
+`jarv-genie sidecar` registers the machine with the hub and long-polls for
+events (notifications by default, `--speak` also reads replies aloud). The
+scheduled agent pushes its deliveries to sidecars when it runs with `--remote`,
+so briefings land on the machines you're actually using. Undelivered events
+persist in `~/.jarv-genie/events.json` until a device comes back online.
+
 ### Computer use
 
 The agent can see and control the hub machine (macOS):
