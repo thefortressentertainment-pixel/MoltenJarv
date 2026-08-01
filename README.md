@@ -23,13 +23,15 @@ the local one is unreachable. Your data stays on your machine by default.
 
 ## Quickstart
 
-Requirements: Node.js 20+.
+Requirements: Node.js 20+ (brew: `npm i -g jarv-genie` once built), and for voice:
+`brew install sox whisper-cpp` plus a whisper model (see *Voice*).
 
 ```bash
 git clone <your-remote> ~/jarv-genie   # or copy this repo wherever you like
 cd ~/jarv-genie
 npm install
 npm run build
+npm install -g .   # optional but recommended: `jarv-genie` works from anywhere
 ```
 
 Start a conversation:
@@ -113,6 +115,70 @@ MCP server still work — they now answer to every paired device.
   with `jarv-genie hub --new-token`.
 - Pairing stores the token on the client with `0600` permissions. Rotating the
   hub token invalidates every linked client until you re-link them.
+
+### Native dock app (macOS)
+
+A Tauri shell wraps the hub as a real dock app. Build it, then the app starts
+`jarv-genie hub` on launch and shows the chat UI in its own window (the hub
+must be installed globally first):
+
+```bash
+cd desktop
+npm install
+npm run build
+# opens as desktop/src-tauri/target/release/bundle/macos/JarvGenie.app
+```
+
+### Voice — talk to it out loud
+
+A fully local voice loop on the hub machine: mic → transcription → agent →
+spoken reply.
+
+```bash
+brew install sox whisper-cpp
+# download a whisper model (or point JARV_GENIE_WHISPER_MODEL at one):
+curl -L -o ~/.cache/whisper/ggml-base.en.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+
+jarv-genie voice            # press Enter to talk; it stops after a pause
+jarv-genie voice --remote   # talk to a linked hub from another machine
+```
+
+Press Enter to start recording (it auto-stops after ~2s of silence), `!` toggles
+speaking, `/new` resets the session. Transcriptions use local whisper.cpp;
+macOS `say` does the talking (184+ voices, sentence-streamed with barge-in).
+If no whisper model is available it falls back to the OpenAI transcription API.
+The agent can also speak on demand from any surface via the `speak_text` tool.
+
+### Scheduled agent — briefings and reminders
+
+Run a lightweight daemon that fires prompts on a cron schedule and delivers the
+answer as a macOS notification, speech, or both:
+
+```bash
+jarv-genie agent schedule "@daily" "Give me a 3-line morning briefing" --notify
+jarv-genie agent schedule "*/30 * * * *" "Remind me to stand up" --speak
+jarv-genie agent list        # show schedules + last run
+jarv-genie agent run <id>    # fire one now
+jarv-genie agent once "…" --notify
+jarv-genie agent             # run the daemon (fires missed runs after sleep)
+```
+
+Schedules live in `~/.jarv-genie/agent.json`; missed runs (e.g. the Mac was
+asleep) fire once on wake.
+
+### Computer use
+
+The agent can see and control the hub machine (macOS):
+
+- `screen_capture` — captures the screen and describes it via a vision model
+  (default `llama3.2-vision` on the primary endpoint). Requires macOS
+  Screen Recording permission.
+- `open_app` — opens any app by name.
+- `run_apple_script` — runs AppleScript/System Events. **Gated**: set
+  `"computer": { "allowControl": true }` in `~/.jarv-genie/config.json` first
+  and grant Accessibility permission. This is the on-ramp to full agentic
+  desktop control with explicit approval.
 
 ### Interactive session
 

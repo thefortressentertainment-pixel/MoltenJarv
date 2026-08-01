@@ -30,40 +30,46 @@ migrate to any device:
   recommended private mesh so the hub is reachable even when the Mac sleeps at
   home. `jarv-genie` is installable globally (`npm i -g`), so `--remote` works
   from any machine's terminal/editor.
-- **Next**: wrap the web app in a native shell for a true dock/menu-bar app
-  (Tauri for a small binary, or the existing `JarvGenie` macOS app as the front
-  door), and add streaming replies (SSE) for a smoother feel.
+- **Done — Native shell**: a Tauri app (`desktop/`) wraps the web app as a real
+  macOS dock app; on launch it starts `jarv-genie hub` and shows the chat in its
+  own window. Streaming replies (SSE) land token-by-token in both the web UI
+  and the terminal REPL for a smooth feel.
 - **Later**: the v3 device sidecars let each device run its own front-end against
   one shared hub.
 
-## v2 — Voice
+## v2 — Voice (done, push-to-talk)
 
 The goal: talk to Jarv Genie the way you'd talk to a butler. Local-first,
-sub-second, private.
+sub-second, private. Shipped (`jarv-genie voice`):
 
-- Wake word detection — `openwakeword` / Picovoice Porcupine, on-device
-- Voice activity detection — Silero VAD
-- Speech-to-text — `faster-whisper` / Whisper.cpp (local), or streaming STT
-- Text-to-speech — Kokoro / Piper (local, tens of ms on CPU)
-- Barge-in (interrupt while it speaks) and sentence-level streaming TTS
-- Reference pipeline: `wake → VAD → STT → agent → TTS`, target < 2s end-to-end
-  (see `src/voice/`)
+- [x] Speech-to-text — whisper.cpp (`whisper-cli`, local), OpenAI API fallback
+- [x] Text-to-speech — macOS `say`, sentence-streamed with barge-in (`stopSpeaking`)
+- [x] VAD-ish auto-stop — sox `rec` silence detection (2s default)
+- [x] Push-to-talk loop, `--remote` (talk to the hub from any machine)
+- [x] `speak_text` agent tool (the agent can speak from any surface)
+- [ ] Wake word — openwakeword / Picovoice for hands-free always-on
+- [ ] Streaming STT and faster TTS (Kokoro/Piper) for sub-second replies
 
 ## v3 — Computer use & device reach
 
-- Screen awareness (screenshot → agent) and keyboard/mouse control via
-  accessibility APIs, scoped per-app with explicit approval
-- Device sidecars: a lightweight daemon on each device connecting back to one
-  hub over an authenticated channel, so Jarv Genie can act across laptop, phone,
-  and desktop (your `JarvGenie` macOS/desktop app becomes the front door)
-- Where beneficial, delegate GUI work to a computer-use model
-  (Claude Computer Use / an equivalent) for tasks that have no API
+- [x] Screen awareness (`screen_capture` → vision model describes the screen;
+      macOS screen-recording permission)
+- [x] `open_app` (launch any app)
+- [x] Scoped control with explicit approval: `run_apple_script`
+      (System Events / Accessibility) gated behind `computer.allowControl`
+- [ ] Device sidecars: a lightweight daemon on each device connecting back to
+      one hub over an authenticated channel (the `--remote`/`voice --remote`
+      channel is the current stand-in)
+- [ ] Delegate GUI work to a computer-use model where no API exists
 
 ## v4 — Proactive & scheduled
 
-- Always-on background agent with scheduled briefings (morning digest, reminders)
-- Long-horizon monitors (watch a directory, a web page, a metric)
-- Notifications and approvals through multiple channels (terminal, push)
+- [x] Always-on background agent (`jarv-genie agent`) with cron schedules
+- [x] Missed-run catch-up (fires briefings/reminders after the Mac sleeps)
+- [x] Deliveries: macOS notifications, spoken replies, stdout
+- [x] `agent schedule / list / run / once / remove`
+- [ ] Long-horizon monitors (watch a directory, a web page, a metric)
+- [ ] Notifications through multiple channels (terminal, push to phone)
 
 ## v5 — Learning
 
