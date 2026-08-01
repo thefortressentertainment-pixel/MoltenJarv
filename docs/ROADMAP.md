@@ -47,8 +47,15 @@ sub-second, private. Shipped (`jarv-genie voice`):
 - [x] VAD-ish auto-stop — sox `rec` silence detection (2s default)
 - [x] Push-to-talk loop, `--remote` (talk to the hub from any machine)
 - [x] `speak_text` agent tool (the agent can speak from any surface)
-- [ ] Wake word — openwakeword / Picovoice for hands-free always-on
-- [ ] Streaming STT and faster TTS (Kokoro/Piper) for sub-second replies
+- [x] Wake word — hands-free `jarv-genie voice --wake`: keeps listening and only
+      answers when "hey jarv" (or a custom `--wake-phrase`) is heard; wake word
+      alone prompts for the request; "stop"/"goodbye" sleeps again. Fully local
+      (transcript keyword match with whisper-proof synonyms)
+- [x] Streaming STT — `jarv-genie voice --live`: live captions show what is being
+      heard while you speak (rolling whisper partials over the raw mic pipe)
+- [x] Faster neural TTS — `jarv-genie voice --setup-piper` installs Piper into a
+      private venv (`~/.jarv-genie/piper-venv`) and downloads an English voice;
+      `speak()` prefers it for sub-second replies, falling back to macOS `say`
 
 ## v3 — Computer use & device reach
 

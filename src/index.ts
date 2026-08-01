@@ -10,7 +10,8 @@ import {
 } from './cli/agent.js';
 import { localBackend, remoteBackend } from './cli/backend.js';
 import { runKeyCommand } from './cli/keys.js';
-import { runVoiceSession, type VoiceSessionOptions } from './cli/voice.js';
+import { runVoiceSession, runWakeSession, type VoiceSessionOptions } from './cli/voice.js';
+import { installPiper } from './voice/index.js';
 import { ensureConfigFile } from './config/index.js';
 import { VERSION } from './config/defaults.js';
 import { getTokenStore } from './hub/auth.js';
@@ -37,7 +38,10 @@ Usage:
   jarv-genie hub --token          print the hub token
   jarv-genie link <url> <token>   pair this machine to a hub (token via hub --token)
   jarv-genie unlink               forget the hub
-  jarv-genie voice [--voice N] [--no-tts] [--remote]   talk to the brain out loud
+  jarv-genie voice [--voice N] [--no-tts] [--remote] [--live] [--wake [--wake-phrase "..."] [--quiet]] [--setup-piper]   talk to the brain out loud
+  jarv-genie voice --live   show live captions as you speak (streaming STT)
+  jarv-genie voice --wake   hands-free: answers when you say "hey jarv" (wake word)
+  jarv-genie voice --setup-piper   install neural TTS (Piper) for faster replies
   jarv-genie agent [schedule|list|run|once|remove]     scheduled briefings & reminders
   jarv-genie agent schedule "@daily" "<prompt>" [--notify] [--speak]   add a schedule
   jarv-genie --doctor             check endpoints and memory
@@ -128,6 +132,14 @@ function parseVoiceArgs(argv: string[]): { opts: VoiceSessionOptions; remoteUrl:
     else if (a === '--no-tts') opts.tts = false;
     else if (a === '--model') opts.model = argv[++i];
     else if (a === '--max-seconds') opts.maxSeconds = Number(argv[++i]);
+    else if (a === '--live') opts.live = true;
+    else if (a === '--wake') opts.wake = true;
+    else if (a === '--quiet') opts.quiet = true;
+    else if (a === '--setup-piper') opts.setupPiper = true;
+    else if (a === '--wake-phrase') {
+      const p = argv[++i];
+      if (p) (opts.wakePhrases ??= []).push(p);
+    }
   }
   return { opts, remoteUrl: extractRemote(argv) };
 }
@@ -182,9 +194,15 @@ async function main(): Promise<void> {
 
   if (raw[0] === 'voice') {
     const { opts, remoteUrl } = parseVoiceArgs(raw.slice(1));
+    if (opts.setupPiper) {
+      const model = await installPiper();
+      process.stdout.write(`Piper neural TTS installed (${model})\n`);
+      return;
+    }
     const backend =
       remoteUrl !== undefined ? remoteBackend(resolveRemote(remoteUrl)) : localBackend(await buildAgent());
-    await runVoiceSession(backend, opts);
+    const session = opts.wake ? runWakeSession : runVoiceSession;
+    await session(backend, opts);
     return;
   }
 

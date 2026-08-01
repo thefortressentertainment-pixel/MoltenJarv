@@ -142,6 +142,9 @@ curl -L -o ~/.cache/whisper/ggml-base.en.bin \
 
 jarv-genie voice            # press Enter to talk; it stops after a pause
 jarv-genie voice --remote   # talk to a linked hub from another machine
+jarv-genie voice --live     # live captions while you speak (streaming STT)
+jarv-genie voice --wake     # hands-free: answers when you say "hey jarv"
+jarv-genie voice --setup-piper  # optional: install neural TTS for faster replies
 ```
 
 Press Enter to start recording (it auto-stops after ~2s of silence), `!` toggles
@@ -149,6 +152,18 @@ speaking, `/new` resets the session. Transcriptions use local whisper.cpp;
 macOS `say` does the talking (184+ voices, sentence-streamed with barge-in).
 If no whisper model is available it falls back to the OpenAI transcription API.
 The agent can also speak on demand from any surface via the `speak_text` tool.
+
+- **`--live` (streaming STT)** — captions appear in near-real-time as you speak
+  (rolling whisper partials over the raw mic pipe), so you see what is heard
+  before the final pass.
+- **`--wake` (wake word, hands-free)** — it keeps listening and only responds
+  when you say "hey jarv" (or `--wake-phrase "…"`, repeatable). Say the wake
+  word alone and it prompts for the request; "stop"/"goodbye" puts it back to
+  sleep. All local — no cloud keyword spotting.
+- **`--setup-piper` (faster neural TTS)** — installs Piper into a private venv
+  (`~/.jarv-genie/piper-venv`) and downloads an English voice
+  (`~/.jarv-genie/voices/`). Replies then use Piper (sub-second, natural) with
+  macOS `say` as fallback.
 
 ### Scheduled agent — briefings and reminders
 
