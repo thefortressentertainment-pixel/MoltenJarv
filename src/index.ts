@@ -1,5 +1,13 @@
 #!/usr/bin/env node
 import { runDoctor, runOneShot, runRepl, buildAgent } from './cli/index.js';
+import {
+  addSchedule,
+  printSchedules,
+  removeSchedule,
+  runAdHoc,
+  runAgentSchedule,
+  runScheduleNow,
+} from './cli/agent.js';
 import { localBackend, remoteBackend } from './cli/backend.js';
 import { runKeyCommand } from './cli/keys.js';
 import { runVoiceSession, type VoiceSessionOptions } from './cli/voice.js';
@@ -8,6 +16,7 @@ import { VERSION } from './config/defaults.js';
 import { getTokenStore } from './hub/auth.js';
 import { runMcpServer } from './mcp/server.js';
 import { getLinkStore, RemoteClient } from './remote/client.js';
+import { loadAgentConfig } from './scheduler/index.js';
 import { serveUi, type UiServerOptions } from './ui/server.js';
 
 interface Args {
@@ -29,6 +38,8 @@ Usage:
   jarv-genie link <url> <token>   pair this machine to a hub (token via hub --token)
   jarv-genie unlink               forget the hub
   jarv-genie voice [--voice N] [--no-tts] [--remote]   talk to the brain out loud
+  jarv-genie agent [schedule|list|run|once|remove]     scheduled briefings & reminders
+  jarv-genie agent schedule "@daily" "<prompt>" [--notify] [--speak]   add a schedule
   jarv-genie --doctor             check endpoints and memory
   jarv-genie --mcp [--transport http --port 3000]   run as an MCP server
   jarv-genie key <set|rm|list>    manage API keys (stored securely)
@@ -99,26 +110,26 @@ function parseHubArgs(argv: string[]): UiServerOptions & { token?: boolean; newT
   return out;
 }
 
+function extractRemote(argv: string[]): string | undefined {
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--remote') {
+      const n = argv[i + 1];
+      return n && /^https?:\/\//.test(n) ? n : '';
+    }
+  }
+  return undefined;
+}
+
 function parseVoiceArgs(argv: string[]): { opts: VoiceSessionOptions; remoteUrl: string | undefined } {
   const opts: VoiceSessionOptions = {};
-  let remoteUrl: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--voice') opts.voice = argv[++i];
     else if (a === '--no-tts') opts.tts = false;
     else if (a === '--model') opts.model = argv[++i];
     else if (a === '--max-seconds') opts.maxSeconds = Number(argv[++i]);
-    else if (a === '--remote') {
-      const n = argv[i + 1];
-      if (n && /^https?:\/\//.test(n)) {
-        remoteUrl = n;
-        i++;
-      } else {
-        remoteUrl = '';
-      }
-    }
   }
-  return { opts, remoteUrl };
+  return { opts, remoteUrl: extractRemote(argv) };
 }
 
 function resolveRemote(urlOrEmpty: string): RemoteClient {
@@ -175,6 +186,65 @@ async function main(): Promise<void> {
       remoteUrl !== undefined ? remoteBackend(resolveRemote(remoteUrl)) : localBackend(await buildAgent());
     await runVoiceSession(backend, opts);
     return;
+  }
+
+  if (raw[0] === 'agent') {
+    const rest = raw.slice(1);
+    const remoteUrl = extractRemote(rest);
+    const backend =
+      remoteUrl !== undefined ? remoteBackend(resolveRemote(remoteUrl)) : localBackend(await buildAgent());
+    const sub = rest[0];
+
+    if (sub === 'schedule') {
+      const cron = rest[1];
+      const prompt = rest.slice(2).filter((a) => !a.startsWith('-')).join(' ');
+      const flags = { notify: rest.includes('--notify'), speak: rest.includes('--speak') };
+      if (!cron || !prompt) {
+        process.stderr.write('Usage: jarv-genie agent schedule "<cron>" "<prompt>" [--notify] [--speak]\n');
+        process.exit(1);
+      }
+      addSchedule(cron, prompt, flags);
+      return;
+    }
+    if (sub === 'list') {
+      printSchedules(loadAgentConfig());
+      return;
+    }
+    if (sub === 'remove') {
+      removeSchedule(rest[1] ?? '');
+      return;
+    }
+    if (sub === 'run') {
+      if (!rest[1]) {
+        process.stderr.write('Usage: jarv-genie agent run <id>\n');
+        process.exit(1);
+      }
+      await runScheduleNow(rest[1], backend);
+      return;
+    }
+    if (sub === 'once') {
+      const prompt = rest.filter((a) => !a.startsWith('-')).slice(1).join(' ');
+      if (!prompt) {
+        process.stderr.write('Usage: jarv-genie agent once "<prompt>" [--notify] [--speak]\n');
+        process.exit(1);
+      }
+      await runAdHoc(prompt, backend, { notify: rest.includes('--notify'), speak: rest.includes('--speak') });
+      return;
+    }
+
+    // default: run the daemon
+    process.stdout.write(`[jarv-genie] agent daemon (${backend.kind}) — ctrl-c to stop\n`);
+    printSchedules(loadAgentConfig());
+    const tick = async () => {
+      await runAgentSchedule(loadAgentConfig(), backend);
+    };
+    await tick();
+    const timer = setInterval(tick, 30_000);
+    process.on('SIGINT', () => {
+      clearInterval(timer);
+      process.exit(0);
+    });
+    await new Promise(() => {});
   }
 
   if (raw[0] === 'hub' || raw[0] === 'ui') {
