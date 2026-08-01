@@ -205,6 +205,25 @@ scheduled agent pushes its deliveries to sidecars when it runs with `--remote`,
 so briefings land on the machines you're actually using. Undelivered events
 persist in `~/.jarv-genie/events.json` until a device comes back online.
 
+### Monitors — long-horizon watches
+
+Watch a directory, a web page, or a command's output and get the agent's take
+the moment it changes:
+
+```bash
+jarv-genie monitor add dir ~/Downloads "Summarize what just landed" --every 60 --notify
+jarv-genie monitor add web https://status.example.com "Is the service having trouble?"
+jarv-genie monitor add metric "df -h / | tail -1" "Tell me if the disk is getting full" --every 600 --speak
+jarv-genie monitor list      # show watches
+jarv-genie monitor remove <id>
+jarv-genie monitor           # run the daemon (checks every 30s, fires on change)
+```
+
+Monitors snapshot their target on add and fire only when it actually changes
+(new/modified files, different page content, changed command output). Works
+locally or with `--remote` against a hub. Config lives in
+`~/.jarv-genie/monitors.json`.
+
 ### Computer use
 
 The agent can see and control the hub machine (macOS):

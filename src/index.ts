@@ -11,6 +11,7 @@ import {
 import { localBackend, remoteBackend } from './cli/backend.js';
 import { runKeyCommand } from './cli/keys.js';
 import { runSidecar, sendNotify } from './cli/sidecar.js';
+import { addMonitor, printMonitors, removeMonitor, runMonitorDaemon } from './cli/monitor.js';
 import { runVoiceSession, runWakeSession, type VoiceSessionOptions } from './cli/voice.js';
 import { installPiper } from './voice/index.js';
 import { ensureConfigFile } from './config/index.js';
@@ -41,6 +42,8 @@ Usage:
   jarv-genie unlink               forget the hub
   jarv-genie sidecar [--name X] [--speak] [--no-notify] [--remote]   connect a device to the hub
   jarv-genie notify "text" [--device NAME] [--speak] [--remote]   push to connected devices
+  jarv-genie monitor [add <dir|web|metric> <target> "<prompt>" [--every N] [--notify] [--speak] | list | remove <id>]   long-horizon watches
+  jarv-genie monitor    run the monitor daemon (fires when a watched target changes)
   jarv-genie voice [--voice N] [--no-tts] [--remote] [--live] [--wake [--wake-phrase "..."] [--quiet]] [--setup-piper]   talk to the brain out loud
   jarv-genie voice --live   show live captions as you speak (streaming STT)
   jarv-genie voice --wake   hands-free: answers when you say "hey jarv" (wake word)
@@ -219,6 +222,52 @@ async function main(): Promise<void> {
     const client = remoteUrl !== undefined ? resolveRemote(remoteUrl) : resolveRemote('');
     const device = rest.find((a, i) => rest[i - 1] === '--device');
     await sendNotify(client, text, { device, speak: rest.includes('--speak') });
+    return;
+  }
+
+  if (raw[0] === 'monitor') {
+    const rest = raw.slice(1);
+    const remoteUrl = extractRemote(rest);
+    const backend =
+      remoteUrl !== undefined ? remoteBackend(resolveRemote(remoteUrl)) : localBackend(await buildAgent());
+    const sub = rest[0];
+
+    if (sub === 'add') {
+      const kind = rest[1];
+      const target = rest[2];
+      const withoutFlags = rest.slice(3).filter((a, i, arr) => {
+        if (a === '--every') return false;
+        return !(arr[i - 1] === '--every');
+      });
+      const prompt = withoutFlags.filter((a) => !a.startsWith('-')).join(' ');
+      const every = Number(rest.find((a, i) => rest[i - 1] === '--every') ?? NaN);
+      try {
+        await addMonitor(kind ?? '', target ?? '', prompt, {
+          every: Number.isFinite(every) ? every : undefined,
+          notify: rest.includes('--notify'),
+          speak: rest.includes('--speak'),
+        });
+      } catch (err) {
+        process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+        process.exit(1);
+      }
+      return;
+    }
+    if (sub === 'list') {
+      printMonitors();
+      return;
+    }
+    if (sub === 'remove') {
+      try {
+        removeMonitor(rest[1] ?? '');
+      } catch (err) {
+        process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+        process.exit(1);
+      }
+      return;
+    }
+
+    await runMonitorDaemon(backend);
     return;
   }
 

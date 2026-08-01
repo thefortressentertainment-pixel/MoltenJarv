@@ -78,7 +78,10 @@ sub-second, private. Shipped (`jarv-genie voice`):
 - [x] Missed-run catch-up (fires briefings/reminders after the Mac sleeps)
 - [x] Deliveries: macOS notifications, spoken replies, stdout
 - [x] `agent schedule / list / run / once / remove`
-- [ ] Long-horizon monitors (watch a directory, a web page, a metric)
+- [x] Long-horizon monitors (`jarv-genie monitor`): watch a directory, a web
+      page, or a command's output; fires the agent the moment the target changes
+      (e.g. "tell me when files land in ~/Downloads"). Persisted snapshots mean
+      nothing fires until the target actually changes.
 - [x] Notifications through multiple channels — device sidecars (`jarv-genie
       sidecar`) deliver pushes to any machine; `jarv-genie notify` fans out; the
       agent daemon pushes deliveries to sidecars when running with `--remote`
