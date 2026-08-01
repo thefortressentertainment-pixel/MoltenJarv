@@ -13,6 +13,20 @@ planned, along with the concrete technology that each phase will use.
 - [x] MCP server (stdio + streamable HTTP) exposing all tools
 - [x] MCP client importing external servers as tools
 - [x] Interactive REPL, one-shot mode, `--doctor` diagnostics
+- [x] App-style chat UI (`jarv-genie ui`) — local web app, no terminal prompt
+
+## UI across devices
+
+The app UI is a self-hosted local web app (`src/ui/`), so the same interface can
+migrate to any device:
+
+- **Now**: macOS browser on `http://127.0.0.1:3001`; `--host 0.0.0.0` already
+  makes it reachable from phones/tablets on the LAN.
+- **Next**: wrap the web app in a native shell for a true dock/menu-bar app
+  (Tauri for a small binary, or the existing `JarvGenie` macOS app as the front
+  door), and add streaming replies (SSE) for a smoother feel.
+- **Later**: the v3 device sidecars let each device run its own front-end against
+  one shared hub.
 
 ## v2 — Voice
 

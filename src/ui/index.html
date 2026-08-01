@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jarv Genie</title>
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">J</span>
+      <div class="brand-text">
+        <span class="name">Jarv Genie</span>
+        <span class="status" id="statusPill">connecting…</span>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button id="newBtn" class="btn ghost" title="Start a new conversation">New</button>
+      <button id="menuBtn" class="btn ghost" title="Settings and details">Details</button>
+    </div>
+  </header>
+
+  <main id="messages" class="messages" aria-live="polite">
+    <div class="welcome">
+      <div class="welcome-title">Jarv Genie</div>
+      <div class="welcome-sub" id="welcomeSub">Local-first personal assistant</div>
+      <div class="chips" id="chips"></div>
+    </div>
+  </main>
+
+  <footer class="composer">
+    <textarea id="input" rows="1" placeholder="Message Jarv Genie…  (Enter to send, Shift+Enter for a new line)" autofocus></textarea>
+    <button id="sendBtn" class="btn primary" disabled>Send</button>
+  </footer>
+
+  <aside id="panel" class="panel hidden" aria-hidden="true">
+    <div class="panel-head">
+      <span class="panel-title">Jarv Genie</span>
+      <button id="panelClose" class="btn ghost" title="Close">Close</button>
+    </div>
+
+    <section>
+      <h3>Model</h3>
+      <div class="row">
+        <input id="modelInput" class="text" placeholder="e.g. llama3.2" autocomplete="off" />
+        <button id="modelBtn" class="btn">Apply</button>
+      </div>
+      <p class="hint" id="modelHint"></p>
+    </section>
+
+    <section>
+      <h3>Status</h3>
+      <ul class="status-list" id="statusList"></ul>
+    </section>
+
+    <section>
+      <h3>Tools</h3>
+      <div class="chips chips-static" id="toolList"></div>
+    </section>
+
+    <section>
+      <h3>Memory</h3>
+      <p class="hint" id="memoryLine"></p>
+    </section>
+
+    <p class="footnote">
+      Add API keys with <code>jarv-genie key set NAME</code> from a terminal.
+      Everything runs on this machine unless you configure a cloud endpoint.
+    </p>
+  </aside>
+
+  <script src="/app.js"></script>
+</body>
+</html>

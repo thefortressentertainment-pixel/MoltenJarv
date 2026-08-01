@@ -44,6 +44,24 @@ pull llama3.2`), everything works out of the box. To use a cloud fallback, set
 
 ## Usage
 
+### App-style UI
+
+Jarv Genie ships with a chat app, not just a prompt box. Start it and your
+browser opens it automatically:
+
+```bash
+npm start -- ui              # or: jarv-genie ui
+npm start -- ui --port 4000  # custom port
+npm start -- ui --host 0.0.0.0 --no-open   # reachable from your LAN, no auto-open
+```
+
+The UI is a local web app served by Jarv Genie itself on `127.0.0.1` (default
+`http://127.0.0.1:3001`). It has chat bubbles, a typing indicator, suggested
+prompts, a details panel (model switch, tools, memory count, status), and a
+"New" button to reset the conversation. Because it is just a local web app, the
+same interface can later be pointed at from any device on your network — the
+first step toward running on all your devices.
+
 ### Interactive session
 
 ```bash

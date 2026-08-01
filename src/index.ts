@@ -4,6 +4,7 @@ import { runKeyCommand } from './cli/keys.js';
 import { ensureConfigFile } from './config/index.js';
 import { VERSION } from './config/defaults.js';
 import { runMcpServer } from './mcp/server.js';
+import { serveUi, type UiServerOptions } from './ui/server.js';
 
 interface Args {
   mode: 'repl' | 'oneshot' | 'mcp' | 'doctor' | 'help';
@@ -51,12 +52,29 @@ function parseArgs(argv: string[]): Args {
   return out;
 }
 
+function parseUiArgs(argv: string[]): UiServerOptions {
+  const out: UiServerOptions = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--port') out.port = Number(argv[++i]);
+    else if (a === '--host') out.host = argv[++i];
+    else if (a === '--no-open') out.open = false;
+  }
+  return out;
+}
+
 async function main(): Promise<void> {
   ensureConfigFile();
   const raw = process.argv.slice(2);
 
   if (raw[0] === 'key') {
     await runKeyCommand(raw.slice(1));
+    return;
+  }
+
+  if (raw[0] === 'ui') {
+    const ctx = await buildAgent();
+    await serveUi(ctx, parseUiArgs(raw.slice(1)));
     return;
   }
 
@@ -71,6 +89,7 @@ async function main(): Promise<void> {
           '  jarv-genie "prompt"             one-shot\n' +
           '  jarv-genie --doctor             check endpoints and memory\n' +
           '  jarv-genie --mcp [--transport http --port 3000]   run as an MCP server\n' +
+          '  jarv-genie ui [--port N] [--host H] [--no-open]    app-style chat UI\n' +
           '  jarv-genie key <set|rm|list>    manage API keys (stored securely)\n' +
           '  jarv-genie --version\n',
       );
