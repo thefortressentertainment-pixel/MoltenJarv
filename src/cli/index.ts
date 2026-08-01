@@ -1,5 +1,6 @@
 import { createInterface } from 'node:readline/promises';
 import { Agent } from '../agent/agent.js';
+import type { ChatBackend } from './backend.js';
 import type { JarvGenieConfig } from '../config/index.js';
 import { ensureConfigFile, loadConfig } from '../config/index.js';
 import { VERSION } from '../config/defaults.js';
@@ -40,16 +41,9 @@ export async function buildAgent(): Promise<AgentContext> {
   return { agent, router, memory, config, tools: registry, externalErrors };
 }
 
-export async function runRepl(ctx: AgentContext): Promise<void> {
-  const { agent, router, memory, config, tools, externalErrors } = ctx;
-
-  process.stdout.write(
-    `Jarv Genie v${VERSION}\n` +
-      `  primary : ${router.providers[0]?.label ?? 'none'}\n` +
-      `  memory  : ${config.memory.dir}\n` +
-      `  tools   : ${tools.list().length} registered (${externalErrors.length ? `${externalErrors.length} external failed` : 'all connected'})\n` +
-      `Type /help for commands, or just talk.\n`,
-  );
+export async function runRepl(backend: ChatBackend): Promise<void> {
+  const banner = await backend.describe();
+  process.stdout.write(banner.join('\n') + '\n');
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   rl.on('SIGINT', () => {
@@ -58,16 +52,21 @@ export async function runRepl(ctx: AgentContext): Promise<void> {
   });
 
   for (;;) {
-    const line = (await rl.question('jarv-genie> ')).trim();
+    let line: string;
+    try {
+      line = (await rl.question('jarv-genie> ')).trim();
+    } catch {
+      break;
+    }
     if (!line) continue;
 
     if (line.startsWith('/')) {
-      await handleCommand(line, ctx);
+      await handleCommand(line, backend);
       continue;
     }
 
     try {
-      const result = await agent.run(line, SESSION);
+      const result = await backend.chat(line);
       process.stdout.write(`\n${result.text}\n\n`);
     } catch (err) {
       process.stdout.write(`\nError: ${err instanceof Error ? err.message : String(err)}\n`);
@@ -75,8 +74,7 @@ export async function runRepl(ctx: AgentContext): Promise<void> {
   }
 }
 
-async function handleCommand(line: string, ctx: AgentContext): Promise<void> {
-  const { agent, router, memory, tools } = ctx;
+async function handleCommand(line: string, backend: ChatBackend): Promise<void> {
   const [cmd, ...rest] = line.slice(1).split(/\s+/);
   const arg = rest.join(' ');
 
@@ -93,24 +91,26 @@ async function handleCommand(line: string, ctx: AgentContext): Promise<void> {
       );
       break;
     case 'new':
-      await memory.sessionReset('default');
+      await backend.reset();
       process.stdout.write('Session reset. Memory kept.\n');
       break;
     case 'model':
       if (arg) {
-        router.setPrimaryModel(arg);
-        process.stdout.write(`Primary model set to ${arg}\n`);
+        const model = await backend.setModel(arg);
+        process.stdout.write(`Primary model set to ${model}\n`);
       } else {
-        process.stdout.write(`Primary model is ${router.primaryModel}\n`);
+        process.stdout.write(`Primary model is ${await backend.model()}\n`);
       }
       break;
     case 'tools':
-      for (const t of tools.list()) process.stdout.write(`  ${t.name} — ${t.description.split('\n')[0]}\n`);
+      for (const t of await backend.listTools()) {
+        process.stdout.write(`  ${t.name}${t.description ? ` — ${t.description}` : ''}\n`);
+      }
       break;
     case 'memory': {
-      const facts = await memory.listFacts();
-      process.stdout.write(`${facts.length} fact${facts.length === 1 ? '' : 's'} remembered\n`);
-      for (const f of facts.slice(0, 10)) process.stdout.write(`  [${f.id.slice(0, 8)}] ${f.text}\n`);
+      const summary = await backend.memorySummary();
+      process.stdout.write(`${summary.count} fact${summary.count === 1 ? '' : 's'} remembered\n`);
+      for (const s of summary.samples) process.stdout.write(s + '\n');
       break;
     }
     case 'quit':
@@ -123,9 +123,9 @@ async function handleCommand(line: string, ctx: AgentContext): Promise<void> {
   }
 }
 
-export async function runOneShot(ctx: AgentContext, prompt: string): Promise<void> {
+export async function runOneShot(backend: ChatBackend, prompt: string): Promise<void> {
   try {
-    const result = await ctx.agent.run(prompt);
+    const result = await backend.chat(prompt);
     process.stdout.write(result.text + '\n');
     if (!result.text) {
       process.stdout.write('[no response generated; run --doctor to check connectivity]\n');

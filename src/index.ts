@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 import { runDoctor, runOneShot, runRepl, buildAgent } from './cli/index.js';
+import { localBackend, remoteBackend } from './cli/backend.js';
 import { runKeyCommand } from './cli/keys.js';
 import { ensureConfigFile } from './config/index.js';
 import { VERSION } from './config/defaults.js';
+import { getTokenStore } from './hub/auth.js';
 import { runMcpServer } from './mcp/server.js';
+import { getLinkStore, RemoteClient } from './remote/client.js';
 import { serveUi, type UiServerOptions } from './ui/server.js';
 
 interface Args {
@@ -11,7 +14,24 @@ interface Args {
   prompt?: string;
   mcpTransport?: 'stdio' | 'http';
   mcpPort?: number;
+  remoteUrl?: string;
 }
+
+const HELP = `jarv-genie ${VERSION} — a standalone, local-first personal AI assistant
+
+Usage:
+  jarv-genie                      interactive session (local)
+  jarv-genie "prompt"             one-shot (local)
+  jarv-genie --remote [URL]       use the linked hub (or URL) for any mode
+  jarv-genie hub [--host H] [--port N] [--no-open] [--no-auth|--auth]   start the brain
+  jarv-genie hub --token          print the hub token
+  jarv-genie link <url> <token>   pair this machine to a hub (token via hub --token)
+  jarv-genie unlink               forget the hub
+  jarv-genie --doctor             check endpoints and memory
+  jarv-genie --mcp [--transport http --port 3000]   run as an MCP server
+  jarv-genie key <set|rm|list>    manage API keys (stored securely)
+  jarv-genie --version
+`;
 
 function parseArgs(argv: string[]): Args {
   const out: Args = { mode: 'repl' };
@@ -32,6 +52,16 @@ function parseArgs(argv: string[]): Args {
       case '--doctor':
         out.mode = 'doctor';
         break;
+      case '--remote': {
+        const next = argv[i + 1];
+        if (next && /^https?:\/\//.test(next)) {
+          out.remoteUrl = next;
+          i++;
+        } else {
+          out.remoteUrl = '';
+        }
+        break;
+      }
       case '--help':
       case '-h':
         out.mode = 'help';
@@ -52,15 +82,41 @@ function parseArgs(argv: string[]): Args {
   return out;
 }
 
-function parseUiArgs(argv: string[]): UiServerOptions {
-  const out: UiServerOptions = {};
+function parseHubArgs(argv: string[]): UiServerOptions & { token?: boolean; newToken?: boolean } {
+  const out: UiServerOptions & { token?: boolean; newToken?: boolean } = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--port') out.port = Number(argv[++i]);
     else if (a === '--host') out.host = argv[++i];
     else if (a === '--no-open') out.open = false;
+    else if (a === '--no-auth') out.auth = false;
+    else if (a === '--auth') out.auth = true;
+    else if (a === '--token') out.token = true;
+    else if (a === '--new-token') out.newToken = true;
   }
   return out;
+}
+
+function resolveRemote(urlOrEmpty: string): RemoteClient {
+  const url = urlOrEmpty || getLinkStore().get()?.url;
+  const token = getLinkStore().get()?.token;
+  if (!url || !token) {
+    process.stderr.write('not linked to a hub — run `jarv-genie link <url> <token>` first (or pass `--remote <url>` after linking)\n');
+    process.exit(1);
+  }
+  return new RemoteClient(url, token);
+}
+
+async function runRemoteDoctor(client: RemoteClient): Promise<void> {
+  try {
+    const s = await client.status();
+    process.stdout.write(`Hub: v${s.version} (${s.providers.join(' · ') || 'no providers'})\n`);
+    process.stdout.write(`[${s.facts > 0 ? 'OK' : '--'}] memory: ${s.facts} facts\n`);
+    for (const err of s.externalErrors) process.stdout.write(`[FAIL] external mcp: ${err}\n`);
+  } catch (err) {
+    process.stdout.write(`[FAIL] hub unreachable: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.exitCode = 1;
+  }
 }
 
 async function main(): Promise<void> {
@@ -72,30 +128,49 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (raw[0] === 'ui') {
+  if (raw[0] === 'link') {
+    const [url, token] = raw.slice(1);
+    if (!url || !token) {
+      process.stderr.write('Usage: jarv-genie link <hub-url> <token>\n');
+      process.exit(1);
+    }
+    getLinkStore().set(url, token);
+    process.stdout.write(`Linked to ${url}\n`);
+    return;
+  }
+
+  if (raw[0] === 'unlink') {
+    getLinkStore().clear();
+    process.stdout.write('Unlinked.\n');
+    return;
+  }
+
+  if (raw[0] === 'hub' || raw[0] === 'ui') {
+    const opts = parseHubArgs(raw.slice(1));
+    if (opts.token || opts.newToken) {
+      const store = getTokenStore();
+      const token = opts.newToken ? store.rotate() : store.get();
+      process.stdout.write(`${token}\n`);
+      return;
+    }
     const ctx = await buildAgent();
-    await serveUi(ctx, parseUiArgs(raw.slice(1)));
+    await serveUi(ctx, opts);
     return;
   }
 
   const args = parseArgs(raw);
+  const client = args.remoteUrl !== undefined ? resolveRemote(args.remoteUrl) : null;
 
   switch (args.mode) {
     case 'help':
-      process.stdout.write(
-        `jarv-genie ${VERSION} — a standalone, local-first personal AI assistant\n\n` +
-          'Usage:\n' +
-          '  jarv-genie                      interactive session\n' +
-          '  jarv-genie "prompt"             one-shot\n' +
-          '  jarv-genie --doctor             check endpoints and memory\n' +
-          '  jarv-genie --mcp [--transport http --port 3000]   run as an MCP server\n' +
-          '  jarv-genie ui [--port N] [--host H] [--no-open]    app-style chat UI\n' +
-          '  jarv-genie key <set|rm|list>    manage API keys (stored securely)\n' +
-          '  jarv-genie --version\n',
-      );
+      process.stdout.write(HELP);
       break;
 
     case 'mcp': {
+      if (client) {
+        process.stderr.write('--mcp does not work in remote mode; run --mcp on the hub machine\n');
+        process.exit(1);
+      }
       const ctx = await buildAgent();
       await runMcpServer(ctx.tools, ctx.memory, ctx.config, {
         transport: args.mcpTransport ?? 'stdio',
@@ -105,20 +180,32 @@ async function main(): Promise<void> {
     }
 
     case 'doctor': {
-      const ctx = await buildAgent();
-      await runDoctor(ctx);
+      if (client) {
+        await runRemoteDoctor(client);
+      } else {
+        const ctx = await buildAgent();
+        await runDoctor(ctx);
+      }
       break;
     }
 
     case 'oneshot': {
-      const ctx = await buildAgent();
-      await runOneShot(ctx, args.prompt ?? '');
+      if (client) {
+        await runOneShot(remoteBackend(client), args.prompt ?? '');
+      } else {
+        const ctx = await buildAgent();
+        await runOneShot(localBackend(ctx), args.prompt ?? '');
+      }
       break;
     }
 
     default: {
-      const ctx = await buildAgent();
-      await runRepl(ctx);
+      if (client) {
+        await runRepl(remoteBackend(client));
+      } else {
+        const ctx = await buildAgent();
+        await runRepl(localBackend(ctx));
+      }
       break;
     }
   }

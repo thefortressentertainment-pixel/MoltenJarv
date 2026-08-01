@@ -22,6 +22,14 @@ migrate to any device:
 
 - **Now**: macOS browser on `http://127.0.0.1:3001`; `--host 0.0.0.0` already
   makes it reachable from phones/tablets on the LAN.
+- **Done — Hub + global install**: the UI server can run as a hub
+  (`jarv-genie hub --host 0.0.0.0`) with bearer-token auth on `/api/*`
+  (token auto-generated in `~/.jarv-genie/auth.json`, 0600). Any machine pairs
+  once (`jarv-genie link <url> <token>`) and then runs `jarv-genie --remote`
+  for REPL, one-shot, or `--doctor` against the hub. Tailscale is the
+  recommended private mesh so the hub is reachable even when the Mac sleeps at
+  home. `jarv-genie` is installable globally (`npm i -g`), so `--remote` works
+  from any machine's terminal/editor.
 - **Next**: wrap the web app in a native shell for a true dock/menu-bar app
   (Tauri for a small binary, or the existing `JarvGenie` macOS app as the front
   door), and add streaming replies (SSE) for a smoother feel.

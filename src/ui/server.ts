@@ -5,17 +5,30 @@ import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { SESSION, type AgentContext } from '../cli/index.js';
 import { VERSION } from '../config/defaults.js';
+import { getTokenStore, type TokenStore } from '../hub/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS = new Set(['index.html', 'app.css', 'app.js']);
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '::ffff:127.0.0.1']);
 
 export interface UiServerOptions {
   host?: string;
   port?: number;
   open?: boolean;
+  /** Require a bearer token on /api routes even on loopback. Default: only when bound beyond loopback. */
+  auth?: boolean;
+  /** Token store used when auth is on. Default: the real ~/.jarv-genie store. */
+  tokenStore?: TokenStore;
 }
 
-function handler(ctx: AgentContext) {
+function requireAuth(host: string, opts: UiServerOptions): boolean {
+  return opts.auth ?? !LOOPBACK.has(host);
+}
+
+function handler(ctx: AgentContext, opts: UiServerOptions, host: string) {
+  const guard = requireAuth(host, opts);
+  const tokenStore = guard ? (opts.tokenStore ?? getTokenStore()) : null;
+
   return async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
     try {
       const route = (new URL(req.url ?? '/', 'http://localhost')).pathname;
@@ -25,6 +38,20 @@ function handler(ctx: AgentContext) {
         const name = route.slice(1);
         const type = name.endsWith('.css') ? 'text/css' : name.endsWith('.js') ? 'text/javascript' : 'text/plain';
         return await sendFile(res, name, type);
+      }
+
+      if (!route.startsWith('/api/')) {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Not found');
+        return;
+      }
+
+      if (tokenStore) {
+        const header = req.headers.authorization ?? '';
+        const token = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : undefined;
+        if (!tokenStore.matches(token)) {
+          return json(res, 401, { error: 'unauthorized: provide a hub token (see jarv-genie link)' });
+        }
       }
 
       if (req.method === 'GET' && route === '/api/status') return json(res, 200, await status(ctx));
@@ -82,7 +109,7 @@ async function loadSession(ctx: AgentContext): Promise<Array<{ role: string; con
 export async function listenUi(ctx: AgentContext, opts: UiServerOptions): Promise<{ server: http.Server; url: string }> {
   const host = opts.host ?? '127.0.0.1';
   const port = opts.port ?? 3001;
-  const server = http.createServer(handler(ctx));
+  const server = http.createServer(handler(ctx, opts, host));
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
   const addr = server.address();
   const actualPort = typeof addr === 'object' && addr ? addr.port : port;
@@ -92,7 +119,11 @@ export async function listenUi(ctx: AgentContext, opts: UiServerOptions): Promis
 
 export async function serveUi(ctx: AgentContext, opts: UiServerOptions): Promise<void> {
   const { url } = await listenUi(ctx, opts);
-  process.stdout.write(`[jarv-genie] UI running at ${url}  (Ctrl+C to stop)\n`);
+  const auth = requireAuth(opts.host ?? '127.0.0.1', opts);
+  process.stdout.write(
+    `[jarv-genie] hub listening on ${url}  (Ctrl+C to stop)\n` +
+      (auth ? `[jarv-genie] api auth required — token: ${getTokenStore().get()}\n` : '[jarv-genie] api auth disabled (loopback only)\n'),
+  );
   if (opts.open ?? true) await openBrowser(url);
 }
 

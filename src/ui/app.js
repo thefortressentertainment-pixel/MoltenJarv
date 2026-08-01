@@ -4,12 +4,33 @@ const $ = (id) => document.getElementById(id);
 const messages = $('messages');
 const input = $('input');
 const sendBtn = $('sendBtn');
+const TOKEN_KEY = 'jarvGenieToken';
+let token = localStorage.getItem(TOKEN_KEY) || '';
+
+function saveToken(t) {
+  token = t;
+  localStorage.setItem(TOKEN_KEY, t);
+}
+
+function headers(extra) {
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extra,
+  };
+}
 
 async function api(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
+  const { headers: extraHeaders, ...rest } = options;
+  const res = await fetch(path, { ...rest, headers: headers(extraHeaders) });
+  if (res.status === 401) {
+    const t = window.prompt('This hub requires a token. Paste it (get it with: jarv-genie hub --token):');
+    if (t) {
+      saveToken(t.trim());
+      return api(path, options);
+    }
+    throw new Error('unauthorized: no token provided');
+  }
   if (!res.ok) {
     let message = `HTTP ${res.status}`;
     try {

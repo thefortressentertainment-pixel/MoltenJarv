@@ -58,9 +58,61 @@ npm start -- ui --host 0.0.0.0 --no-open   # reachable from your LAN, no auto-op
 The UI is a local web app served by Jarv Genie itself on `127.0.0.1` (default
 `http://127.0.0.1:3001`). It has chat bubbles, a typing indicator, suggested
 prompts, a details panel (model switch, tools, memory count, status), and a
-"New" button to reset the conversation. Because it is just a local web app, the
-same interface can later be pointed at from any device on your network — the
-first step toward running on all your devices.
+"New" button to reset the conversation.
+
+### One brain, all your devices
+
+Jarv Genie can run as a **hub**: the chat app and the agent live on one machine
+(usually your desktop), and every other machine calls that one brain. The hub
+is reachable over your LAN (or over [Tailscale](https://tailscale.com) so it is
+reachable even when you're away from home), and every request is authenticated
+with a bearer token.
+
+On the hub machine, start the brain bound to your network:
+
+```bash
+jarv-genie hub --host 0.0.0.0 --no-open   # reachable from your LAN
+```
+
+> On a Mac that sleeps, install Tailscale so the hub is reachable from any of
+> your devices regardless of network.
+
+The hub now requires a token on all API routes. Print it and pair each client
+machine:
+
+```bash
+jarv-genie hub --token                    # on the hub machine
+# on each client machine:
+jarv-genie link http://<hub-ip>:3001 <token>
+jarv-genie --remote "what time is it?"    # one-shot against the hub
+jarv-genie --remote                       # interactive session against the hub
+jarv-genie --remote --doctor              # check the hub from here
+```
+
+Loopback traffic (`127.0.0.1`, `localhost`) stays token-free by default. To
+require a token even on loopback, start with `--no-auth` disabled explicitly:
+`jarv-genie hub --host 127.0.0.1 --auth` (see *Hub security* below).
+
+```bash
+jarv-genie unlink                         # forget the hub on this machine
+jarv-genie --remote http://<other-ip>:3001   # use a specific hub without relinking
+```
+
+Client machines store only `{url, token}` in `~/.jarv-genie/link.json` (0600).
+The hub keeps its token in `~/.jarv-genie/auth.json` (0600); rotate it any time
+with `jarv-genie hub --new-token`.
+
+Because the hub is just the same Jarv Genie agent, all tools, memory, and the
+MCP server still work — they now answer to every paired device.
+
+### Hub security
+
+- When the hub is bound beyond loopback, `/api/*` routes require
+  `Authorization: Bearer <token>`; static UI assets stay public.
+- The token is generated once and stored with `0600` permissions; rotate it
+  with `jarv-genie hub --new-token`.
+- Pairing stores the token on the client with `0600` permissions. Rotating the
+  hub token invalidates every linked client until you re-link them.
 
 ### Interactive session
 
