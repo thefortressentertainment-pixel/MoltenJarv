@@ -60,6 +60,7 @@ function handler(ctx: AgentContext, opts: UiServerOptions, host: string) {
         const body = await readJson(req);
         const message = String(body.message ?? '');
         if (!message.trim()) return json(res, 400, { error: 'message is required' });
+        if (body.stream === true) return await streamChat(res, req, ctx, message);
         try {
           const result = await ctx.agent.run(message, SESSION);
           return json(res, 200, result);
@@ -85,6 +86,33 @@ function handler(ctx: AgentContext, opts: UiServerOptions, host: string) {
       json(res, 500, { error: err instanceof Error ? err.message : String(err) });
     }
   };
+}
+
+async function streamChat(res: http.ServerResponse, req: http.IncomingMessage, ctx: AgentContext, message: string): Promise<void> {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.write('retry: 2000\n\n');
+  let closed = false;
+  req.on('close', () => {
+    closed = true;
+  });
+  const send = (data: unknown): void => {
+    if (closed || res.writableEnded) return;
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+  try {
+    const result = await ctx.agent.runStream(message, SESSION, (delta) => send({ text: delta }));
+    send({ meta: { provider: result.provider, model: result.model, steps: result.steps, toolCalls: result.toolCalls } });
+    send({ done: true });
+    res.end();
+  } catch (err) {
+    send({ error: err instanceof Error ? err.message : String(err) });
+    res.end();
+  }
 }
 
 async function status(ctx: AgentContext): Promise<Record<string, unknown>> {

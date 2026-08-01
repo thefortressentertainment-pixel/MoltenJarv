@@ -19,6 +19,8 @@ export interface ChatBackend {
   kind: 'local' | 'remote';
   describe(): Promise<string[]>;
   chat(message: string): Promise<ChatReply>;
+  /** Stream a chat, yielding text deltas as they arrive. Optional. */
+  chatStream?(message: string, onDelta: (delta: string) => void): Promise<ChatReply>;
   reset(): Promise<void>;
   model(): Promise<string>;
   setModel(model: string): Promise<string>;
@@ -41,6 +43,10 @@ export function localBackend(ctx: AgentContext): ChatBackend {
     },
     async chat(message) {
       const result = await ctx.agent.run(message, SESSION);
+      return { text: result.text, provider: result.provider, model: result.model };
+    },
+    async chatStream(message, onDelta) {
+      const result = await ctx.agent.runStream(message, SESSION, onDelta);
       return { text: result.text, provider: result.provider, model: result.model };
     },
     async reset() {
@@ -77,6 +83,10 @@ export function remoteBackend(client: RemoteClient): ChatBackend {
     },
     async chat(message) {
       const result = await client.chat(message);
+      return { text: result.text, provider: result.provider, model: result.model };
+    },
+    async chatStream(message, onDelta) {
+      const result = await client.chatStream(message, onDelta);
       return { text: result.text, provider: result.provider, model: result.model };
     },
     async reset() {

@@ -109,6 +109,69 @@ export class RemoteClient {
     return this.req('POST', '/api/chat', { message });
   }
 
+  /** Stream a chat over SSE, yielding text deltas as they arrive. */
+  async chatStream(message: string, onDelta: (delta: string) => void): Promise<ChatReply> {
+    const res = await fetch(`${this.url}/api/chat`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+      body: JSON.stringify({ message, stream: true }),
+    });
+    if (!res.ok) {
+      let err = `HTTP ${res.status}`;
+      try {
+        const data = (await res.json()) as { error?: string };
+        err = data.error || err;
+      } catch {
+        // keep fallback
+      }
+      throw new Error(err);
+    }
+    if (!res.body) {
+      const data = (await res.json()) as ChatReply;
+      onDelta(data.text ?? '');
+      return data;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let full = '';
+    const meta: Partial<ChatReply> = {};
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buffer.indexOf('\n\n')) >= 0) {
+        const block = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        for (const line of block.split('\n')) {
+          if (!line.startsWith('data: ')) continue;
+          let data: unknown;
+          try {
+            data = JSON.parse(line.slice(6));
+          } catch {
+            continue;
+          }
+          if (data && typeof data === 'object' && typeof (data as { text?: unknown }).text === 'string') {
+            const text = (data as { text: string }).text;
+            full += text;
+            onDelta(text);
+          } else if (data && typeof (data as { meta?: unknown }).meta === 'object') {
+            Object.assign(meta, (data as { meta: Partial<ChatReply> }).meta);
+          } else if (data && typeof (data as { error?: unknown }).error === 'string') {
+            throw new Error((data as { error: string }).error);
+          }
+        }
+      }
+    }
+    return { text: full, steps: meta.steps ?? 0, toolCalls: meta.toolCalls ?? 0, provider: meta.provider ?? '', model: meta.model ?? '' };
+  }
+
   reset(): Promise<{ ok: boolean }> {
     return this.req('POST', '/api/new');
   }

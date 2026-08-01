@@ -43,6 +43,82 @@ async function api(path, options = {}) {
   return res.json();
 }
 
+async function apiStream(path, options) {
+  const { headers: extraHeaders, ...rest } = options;
+  const res = await fetch(path, { ...rest, headers: headers({ Accept: 'text/event-stream', ...extraHeaders }) });
+  if (res.status === 401) {
+    const t = window.prompt('This hub requires a token. Paste it (get it with: jarv-genie hub --token):');
+    if (t) {
+      saveToken(t.trim());
+      return apiStream(path, options);
+    }
+    throw new Error('unauthorized: no token provided');
+  }
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`;
+    try {
+      message = (await res.json()).error || message;
+    } catch {
+      /* keep status fallback */
+    }
+    throw new Error(message);
+  }
+  if (!res.body) return res.json();
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let text = '';
+  const meta = {};
+  let live = null;
+  const typing = $('typing');
+  if (typing) {
+    const wrap = typing.closest('.msg');
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    wrap.replaceChild(bubble, typing);
+    live = bubble;
+  }
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buffer.indexOf('\n\n')) >= 0) {
+      const block = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      for (const line of block.split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        let data;
+        try {
+          data = JSON.parse(line.slice(6));
+        } catch {
+          continue;
+        }
+        if (typeof data.text === 'string') {
+          text += data.text;
+          if (live) {
+            live.textContent = text;
+            scrollBottom();
+          }
+        } else if (data.meta) {
+          Object.assign(meta, data.meta);
+        } else if (data.error) {
+          throw new Error(data.error);
+        }
+      }
+    }
+  }
+  if (live && (meta.provider || meta.model)) {
+    const m = document.createElement('div');
+    m.className = 'meta';
+    m.textContent = `${meta.provider || ''} / ${meta.model || ''}`.replace(/^\/\s*/, '');
+    live.closest('.msg').appendChild(m);
+  }
+  return { text, ...meta };
+}
+
 function scrollBottom() {
   messages.scrollTop = messages.scrollHeight;
 }
@@ -101,13 +177,15 @@ async function send() {
   addTyping();
 
   try {
-    const res = await api('/api/chat', {
+    const res = await apiStream('/api/chat', {
       method: 'POST',
-      body: JSON.stringify({ message: text }),
+      body: JSON.stringify({ message: text, stream: true }),
     });
-    const typing = $('typing');
-    if (typing) typing.closest('.msg').remove();
-    addMessage('assistant', res.text || '(no response)', `${res.provider} / ${res.model}`);
+    if (!res.text) {
+      const typing = $('typing');
+      if (typing) typing.closest('.msg').remove();
+      addMessage('assistant', '(no response)');
+    }
   } catch (err) {
     const typing = $('typing');
     if (typing) typing.closest('.msg').remove();

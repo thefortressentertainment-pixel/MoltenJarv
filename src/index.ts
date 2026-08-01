@@ -2,6 +2,7 @@
 import { runDoctor, runOneShot, runRepl, buildAgent } from './cli/index.js';
 import { localBackend, remoteBackend } from './cli/backend.js';
 import { runKeyCommand } from './cli/keys.js';
+import { runVoiceSession, type VoiceSessionOptions } from './cli/voice.js';
 import { ensureConfigFile } from './config/index.js';
 import { VERSION } from './config/defaults.js';
 import { getTokenStore } from './hub/auth.js';
@@ -27,6 +28,7 @@ Usage:
   jarv-genie hub --token          print the hub token
   jarv-genie link <url> <token>   pair this machine to a hub (token via hub --token)
   jarv-genie unlink               forget the hub
+  jarv-genie voice [--voice N] [--no-tts] [--remote]   talk to the brain out loud
   jarv-genie --doctor             check endpoints and memory
   jarv-genie --mcp [--transport http --port 3000]   run as an MCP server
   jarv-genie key <set|rm|list>    manage API keys (stored securely)
@@ -97,6 +99,28 @@ function parseHubArgs(argv: string[]): UiServerOptions & { token?: boolean; newT
   return out;
 }
 
+function parseVoiceArgs(argv: string[]): { opts: VoiceSessionOptions; remoteUrl: string | undefined } {
+  const opts: VoiceSessionOptions = {};
+  let remoteUrl: string | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--voice') opts.voice = argv[++i];
+    else if (a === '--no-tts') opts.tts = false;
+    else if (a === '--model') opts.model = argv[++i];
+    else if (a === '--max-seconds') opts.maxSeconds = Number(argv[++i]);
+    else if (a === '--remote') {
+      const n = argv[i + 1];
+      if (n && /^https?:\/\//.test(n)) {
+        remoteUrl = n;
+        i++;
+      } else {
+        remoteUrl = '';
+      }
+    }
+  }
+  return { opts, remoteUrl };
+}
+
 function resolveRemote(urlOrEmpty: string): RemoteClient {
   const url = urlOrEmpty || getLinkStore().get()?.url;
   const token = getLinkStore().get()?.token;
@@ -142,6 +166,14 @@ async function main(): Promise<void> {
   if (raw[0] === 'unlink') {
     getLinkStore().clear();
     process.stdout.write('Unlinked.\n');
+    return;
+  }
+
+  if (raw[0] === 'voice') {
+    const { opts, remoteUrl } = parseVoiceArgs(raw.slice(1));
+    const backend =
+      remoteUrl !== undefined ? remoteBackend(resolveRemote(remoteUrl)) : localBackend(await buildAgent());
+    await runVoiceSession(backend, opts);
     return;
   }
 

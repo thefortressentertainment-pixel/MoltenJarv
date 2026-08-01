@@ -52,6 +52,16 @@ export class ModelRouter {
     }
   }
 
+  async streamChat(opts: ChatOptions, onDelta: (delta: string) => void): Promise<ChatResult> {
+    try {
+      return await this.primary.streamChat(opts, onDelta);
+    } catch (err) {
+      this.lastError = err;
+      if (this.fallback) return await this.fallback.streamChat(opts, onDelta);
+      throw err;
+    }
+  }
+
   async doctor(): Promise<DoctorEntry[]> {
     const entries: DoctorEntry[] = [];
     for (const provider of this.providers) {

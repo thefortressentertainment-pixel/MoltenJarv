@@ -13,6 +13,12 @@ function fakeCtx(): AgentContext {
         calls.push('run');
         return { text: `echo: ${_input}`, steps: 1, toolCalls: 0, provider: 'fake', model };
       },
+      runStream: async (_input: string, _sid: string | undefined, onDelta: (d: string) => void) => {
+        calls.push('stream');
+        onDelta('hel');
+        onDelta('lo');
+        return { text: `hello: ${_input}`, steps: 1, toolCalls: 0, provider: 'fake', model };
+      },
     },
     router: {
       providers: [{ label: 'Primary (fake-model)' }],
@@ -107,5 +113,21 @@ test('POST /api/model switches the primary model', async () => {
     });
     const body = await res.json();
     assert.strictEqual(body.model, 'llama3.2:3b');
+  });
+});
+
+test('POST /api/chat with stream:true emits SSE text deltas', async () => {
+  await withServer(async (url) => {
+    const res = await fetch(url + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      body: JSON.stringify({ message: 'hi', stream: true }),
+    });
+    assert.strictEqual(res.status, 200);
+    assert.match(res.headers.get('content-type') ?? '', /text\/event-stream/);
+    const body = await res.text();
+    assert.match(body, /data: \{"text":"hel"\}/);
+    assert.match(body, /data: \{"text":"lo"\}/);
+    assert.match(body, /data: \{"meta":\{"provider":"fake"/);
   });
 });

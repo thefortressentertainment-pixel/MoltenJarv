@@ -18,6 +18,11 @@ function fakeCtx(): AgentContext {
   return {
     agent: {
       run: async (input: string) => ({ text: `echo: ${input}`, steps: 1, toolCalls: 0, provider: 'fake', model: 'fake-model' }),
+      runStream: async (input: string, _sid: string | undefined, onDelta: (d: string) => void) => {
+        onDelta('echo-');
+        onDelta('stream');
+        return { text: `echo-stream: ${input}`, steps: 1, toolCalls: 0, provider: 'fake', model: 'fake-model' };
+      },
     },
     router: {
       providers: [{ label: 'Primary (fake-model)' }],
@@ -129,6 +134,12 @@ test('RemoteClient talks to the hub with its token', async () => {
 
     const reply = await good.chat('hi');
     assert.strictEqual(reply.text, 'echo: hi');
+
+    const deltas: string[] = [];
+    const streamed = await good.chatStream('hi', (d) => deltas.push(d));
+    assert.deepStrictEqual(deltas, ['echo-', 'stream']);
+    assert.strictEqual(streamed.text, 'echo-stream');
+    assert.strictEqual(streamed.model, 'fake-model');
 
     const bad = new RemoteClient(url, 'jarv-nope');
     await assert.rejects(() => bad.status(), /unauthorized/);

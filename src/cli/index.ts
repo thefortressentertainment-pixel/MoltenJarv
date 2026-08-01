@@ -9,6 +9,7 @@ import { loadExternalMcpTools } from '../mcp/client.js';
 import { ModelRouter } from '../providers/index.js';
 import { fileTools } from '../tools/filesystem.js';
 import { memoryTools } from '../tools/memory.js';
+import { speechTools } from '../tools/speech.js';
 import { ToolRegistry } from '../tools/registry.js';
 import { timeTools } from '../tools/time.js';
 import { webTools } from '../tools/web.js';
@@ -30,7 +31,7 @@ export async function buildAgent(): Promise<AgentContext> {
   const memory = buildMemory(config);
 
   const registry = new ToolRegistry();
-  registry.registerMany([...timeTools(), ...fileTools(), ...memoryTools(), ...webTools()]);
+  registry.registerMany([...timeTools(), ...fileTools(), ...memoryTools(), ...webTools(), ...speechTools()]);
 
   const { tools: externalTools, errors: externalErrors } = await loadExternalMcpTools(config.mcp.servers);
   registry.registerMany(externalTools);
@@ -66,8 +67,14 @@ export async function runRepl(backend: ChatBackend): Promise<void> {
     }
 
     try {
-      const result = await backend.chat(line);
-      process.stdout.write(`\n${result.text}\n\n`);
+      if (backend.chatStream) {
+        process.stdout.write('\n');
+        await backend.chatStream(line, (d) => process.stdout.write(d));
+        process.stdout.write('\n\n');
+      } else {
+        const result = await backend.chat(line);
+        process.stdout.write(`\n${result.text}\n\n`);
+      }
     } catch (err) {
       process.stdout.write(`\nError: ${err instanceof Error ? err.message : String(err)}\n`);
     }
@@ -149,6 +156,12 @@ export async function runDoctor(ctx: AgentContext): Promise<void> {
   const embed = memory.embeddings;
   process.stdout.write(
     `[${embed ? (embed.enabled ? 'OK' : 'FAIL') : 'OFF'}] embeddings: ${embed ? embed.model : 'not configured (keyword search only)'}\n`,
+  );
+
+  const voice = await import('../voice/index.js');
+  process.stdout.write(`[${voice.hasTts() ? 'OK' : '--'}] tts: ${voice.voiceStatus.tts}\n`);
+  process.stdout.write(
+    `[${voice.hasWhisperCli() && voice.locateWhisperModel() ? 'OK' : '--'}] stt: ${voice.voiceStatus.stt}\n`,
   );
 
   for (const err of externalErrors) process.stdout.write(`[FAIL] external mcp: ${err}\n`);

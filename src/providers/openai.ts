@@ -46,7 +46,47 @@ export class OpenAICompatibleProvider implements Provider {
     );
     const message = completion.choices?.[0]?.message;
     if (!message) throw new Error('Empty completion response');
+    return this.toChatResult(message);
+  }
 
+  async streamChat(opts: ChatOptions, onDelta: (delta: string) => void): Promise<ChatResult> {
+    const stream = await this.client.chat.completions.create(
+      {
+        model: this.currentModel,
+        messages: this.toOpenAIMessages(opts.messages),
+        stream: true,
+        ...(opts.tools && opts.tools.length > 0 ? { tools: this.toOpenAITools(opts.tools) } : {}),
+      },
+      opts.signal ? { signal: opts.signal } : {},
+    );
+
+    let content = '';
+    const rawCalls: Array<{ id: string; name: string; arguments: string }> = [];
+    for await (const chunk of stream) {
+      const delta = chunk.choices?.[0]?.delta;
+      if (delta?.content) {
+        content += delta.content;
+        onDelta(delta.content);
+      }
+      for (const tc of delta?.tool_calls ?? []) {
+        const idx = tc.index ?? 0;
+        const call = (rawCalls[idx] ??= { id: '', name: '', arguments: '' });
+        if (tc.id) call.id += tc.id;
+        if (tc.function?.name) call.name += tc.function.name;
+        if (tc.function?.arguments) call.arguments += tc.function.arguments;
+      }
+    }
+
+    const toolCalls: ToolCall[] | null =
+      rawCalls.length > 0
+        ? rawCalls
+            .filter((c) => c.name)
+            .map((c) => ({ id: c.id || `call_${Math.random().toString(36).slice(2)}`, name: c.name, arguments: parseArguments(c.arguments) }))
+        : null;
+    return { content: content || null, toolCalls, provider: this.id, model: this.currentModel };
+  }
+
+  private toChatResult(message: OpenAI.Chat.Completions.ChatCompletionMessage): ChatResult {
     const toolCalls: ToolCall[] | null = message.tool_calls?.length
       ? message.tool_calls
           .filter((tc): tc is OpenAI.Chat.Completions.ChatCompletionMessageFunctionToolCall => tc.type === 'function')
@@ -56,7 +96,6 @@ export class OpenAICompatibleProvider implements Provider {
             arguments: parseArguments(tc.function.arguments),
           }))
       : null;
-
     return { content: message.content ?? null, toolCalls, provider: this.id, model: this.currentModel };
   }
 
