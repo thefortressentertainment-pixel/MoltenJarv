@@ -81,6 +81,22 @@ npm run doctor
 Prints whether each configured endpoint (primary, fallback, embeddings) is
 reachable and what model it resolves to.
 
+### Manage API keys securely
+
+Instead of editing config files or exporting secrets by hand, store keys in the
+protected secrets file with the `key` command:
+
+```bash
+jarv-genie key set OPENAI_API_KEY        # prompts — input is hidden
+jarv-genie key set GROQ_API_KEY groq-…   # or pass the value directly
+jarv-genie key list                       # names only; values are masked
+jarv-genie key rm OPENAI_API_KEY
+```
+
+Keys are written to `~/.jarv-genie/secrets.json` with `0600` permissions, never
+to `config.json`, and never logged. Precedence when resolving a key: config
+value → secrets file → environment variable.
+
 ### Run as an MCP server
 
 Expose Jarv Genie's tools (memory, files, time, web search) to any MCP host:
@@ -125,8 +141,9 @@ Environment variables and config values override the defaults:
 
 Any OpenAI-compatible endpoint works for the primary or fallback: OpenAI,
 Ollama, LM Studio, vLLM, Groq, Together, DeepSeek, local gateways, etc. Just
-point `baseUrl` at it and pick a model. API keys are read from environment
-variables — secrets are never written to the config file.
+point `baseUrl` at it and pick a model. API keys are read from the secrets file
+(see *Manage API keys securely*), environment variables, or a config value —
+secrets are never written to the config file.
 
 ## Data & privacy
 

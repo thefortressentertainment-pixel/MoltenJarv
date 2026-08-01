@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { runDoctor, runOneShot, runRepl, buildAgent } from './cli/index.js';
+import { runKeyCommand } from './cli/keys.js';
 import { ensureConfigFile } from './config/index.js';
 import { VERSION } from './config/defaults.js';
 import { runMcpServer } from './mcp/server.js';
@@ -52,7 +53,14 @@ function parseArgs(argv: string[]): Args {
 
 async function main(): Promise<void> {
   ensureConfigFile();
-  const args = parseArgs(process.argv.slice(2));
+  const raw = process.argv.slice(2);
+
+  if (raw[0] === 'key') {
+    await runKeyCommand(raw.slice(1));
+    return;
+  }
+
+  const args = parseArgs(raw);
 
   switch (args.mode) {
     case 'help':
@@ -63,6 +71,7 @@ async function main(): Promise<void> {
           '  jarv-genie "prompt"             one-shot\n' +
           '  jarv-genie --doctor             check endpoints and memory\n' +
           '  jarv-genie --mcp [--transport http --port 3000]   run as an MCP server\n' +
+          '  jarv-genie key <set|rm|list>    manage API keys (stored securely)\n' +
           '  jarv-genie --version\n',
       );
       break;

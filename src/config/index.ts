@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { configPath, dataHome, VERSION } from './defaults.js';
+import { getSecretStore, type SecretStore } from './secrets.js';
 
 export interface EndpointConfig {
   baseUrl?: string;
@@ -101,9 +102,9 @@ export function ensureDirs(cfg: JarvGenieConfig): void {
   }
 }
 
-export function resolveApiKey(cfg: EndpointConfig): string | undefined {
+export function resolveApiKey(cfg: EndpointConfig, secrets: SecretStore = getSecretStore()): string | undefined {
   if (cfg.apiKey) return cfg.apiKey;
-  if (cfg.apiKeyEnv) return process.env[cfg.apiKeyEnv];
+  if (cfg.apiKeyEnv) return secrets.get(cfg.apiKeyEnv) ?? process.env[cfg.apiKeyEnv];
   return undefined;
 }
 
@@ -123,7 +124,7 @@ export function resolveEmbeddingsConfig(cfg: JarvGenieConfig): EndpointConfig | 
       model: envOr('JARV_GENIE_EMBEDDINGS_MODEL', 'nomic-embed-text'),
     };
   }
-  if (process.env.OPENAI_API_KEY) {
+  if (process.env.OPENAI_API_KEY || getSecretStore().get('OPENAI_API_KEY')) {
     return { baseUrl: 'https://api.openai.com/v1', apiKeyEnv: 'OPENAI_API_KEY', model: 'text-embedding-3-small' };
   }
   return null;

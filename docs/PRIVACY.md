@@ -11,6 +11,18 @@ practice.
 - The file-tool workspace — `~/.jarv-genie/workspace`
 - The config file — `~/.jarv-genie/config.json` (contains no secrets)
 
+## API keys
+
+Keys are read in this order: a config value, the secrets file, then an
+environment variable (e.g. `OPENAI_API_KEY`).
+
+The secrets file lives at `~/.jarv-genie/secrets.json` and is created with
+`0600` permissions. Manage it with the CLI (`jarv-genie key set|list|rm`), which
+hides input at the prompt and masks values in listings. Keys are never written
+to `config.json`, never logged, and no key material is stored in this
+repository. Prefer `jarv-genie key set` over exporting secrets in your shell
+profile.
+
 ## What leaves your machine
 
 Only the traffic you explicitly configure:
@@ -23,11 +35,6 @@ Only the traffic you explicitly configure:
 2. **External MCP servers.** Servers listed under `mcp.servers` in the config
    are the only external integrations the agent can reach, and only their tools
    are exposed.
-
-## API keys
-
-Keys are read from environment variables (e.g. `OPENAI_API_KEY`), never written
-to `~/.jarv-genie/config.json`. No key material is stored in this repository.
 
 ## Recommendations
 
