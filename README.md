@@ -158,19 +158,56 @@ jarvgenie://run?task=<url-encoded command>
 ```
 
 ```html
-<a href="jarvgenie://run?task=Open%20the%20calculator">Open the calculator</a>
-<a href="jarvgenie://run?task=What%20time%20is%20it">What time is it?</a>
+<a href="jarvgenie://run?task=Start%20my%20music">Start my music</a>
+<a href="jarvgenie://run?task=Remind%20me%20to%20stretch%20in%20an%20hour">Stretch reminder</a>
+<a href="jarvgenie://run?task=What's%20on%20my%20screen%3F">What's on my screen?</a>
 ```
 
 Clicking the link starts the app (or brings it to the front), makes sure the
 hub is running, then sends the task straight into the chat. From the terminal:
 
 ```bash
-open "jarvgenie://run?task=Open%20the%20calculator"
+open "jarvgenie://run?task=Start%20my%20music"
 ```
 
 Any command you can type in the chat — questions, reminders, tool calls,
-monitors — can ride in on a link.
+monitors, anything on this machine — can ride in on a link. Same for voice:
+the mic button and hands-free mode work for everything the machine can do.
+
+### Updating — publish once, every machine gets prompted
+
+Jarv Genie is self-hosted, so "updates" are something you publish, and every
+other machine (on your tailnet, or anywhere a hub is linked to yours) picks
+them up automatically.
+
+**Publish a new build** on the machine that distributes it (usually your host):
+
+```bash
+jarv-genie update publish JarvGenie_0.1.1_aarch64.dmg --version 0.1.1 --notes "what changed"
+```
+
+That stages the installer and a manifest where the hub can serve them. The hub
+then exposes it at `GET /api/update`.
+
+**Everyone else gets prompted automatically.** A hub checks for updates:
+
+- against its own published manifest (the machine that published it), or
+- against any update server you point it at — e.g. your host over Tailscale:
+
+```bash
+jarv-genie hub --update-url http://<your-host>:3001
+```
+
+When a newer version exists, the chat window shows a banner: *"Jarv Genie vX is
+available"* with a **Download & update** button. Clicking it pulls the new
+installer from the host into `~/Downloads` and opens it. From a terminal you can
+check too:
+
+```bash
+jarv-genie update list                 # what this machine has published
+jarv-genie update check                # up to date? (checks linked hub / local manifest)
+jarv-genie update check --url http://<your-host>:3001
+```
 
 ### Voice — talk to it out loud
 

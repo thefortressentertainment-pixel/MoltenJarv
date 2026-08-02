@@ -2,14 +2,17 @@ import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import os from 'node:os';
+import { createReadStream } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { SESSION, type AgentContext } from '../cli/index.js';
 import { VERSION } from '../config/defaults.js';
 import { getTokenStore, type TokenStore } from '../hub/auth.js';
+import { getLinkStore } from '../remote/client.js';
 import { DeviceStore, pushNotify } from '../sidecar/devices.js';
 import { speakToWav, transcribe } from '../voice/index.js';
+import { artifactPath, checkUpdateStatus, readManifest } from '../updates/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS = new Set(['index.html', 'app.css', 'app.js']);
@@ -25,10 +28,19 @@ export interface UiServerOptions {
   tokenStore?: TokenStore;
   /** Device registry + push queue. Default: the real ~/.jarv-genie store. */
   deviceStore?: DeviceStore;
+  /** Update server to check for newer builds (default: this hub's own published update). */
+  updateUrl?: string;
 }
 
 function requireAuth(host: string, opts: UiServerOptions): boolean {
   return opts.auth ?? !LOOPBACK.has(host);
+}
+
+/** Bearer token for talking to the update server, when it's the hub we're linked to. */
+function updateToken(updateUrl: string | undefined): string | undefined {
+  const linked = getLinkStore().get();
+  if (!updateUrl || !linked?.url) return undefined;
+  return updateUrl.replace(/\/+$/, '') === linked.url.replace(/\/+$/, '') ? linked.token : undefined;
 }
 
 function handler(ctx: AgentContext, opts: UiServerOptions, host: string) {
@@ -138,6 +150,58 @@ function handler(ctx: AgentContext, opts: UiServerOptions, host: string) {
 
       if (req.method === 'GET' && route === '/api/status') return json(res, 200, await status(ctx));
       if (req.method === 'GET' && route === '/api/session') return json(res, 200, await loadSession(ctx));
+
+      if (req.method === 'GET' && route === '/api/update') {
+        const m = readManifest();
+        if (!m) return json(res, 404, { error: 'no update published' });
+        return json(res, 200, m);
+      }
+      if (req.method === 'GET' && route === '/api/update/status') {
+        return json(res, 200, await checkUpdateStatus(opts.updateUrl, updateToken(opts.updateUrl)));
+      }
+      if (req.method === 'GET' && route === '/api/update/download') {
+        const m = readManifest();
+        if (!m) return json(res, 404, { error: 'no update published' });
+        try {
+          const st = await fs.stat(artifactPath(m));
+          res.writeHead(200, {
+            'Content-Type': 'application/octet-stream',
+            'Content-Length': st.size,
+            'Content-Disposition': `attachment; filename="${m.artifact}"`,
+          });
+          createReadStream(artifactPath(m)).pipe(res);
+        } catch {
+          return json(res, 404, { error: 'artifact missing' });
+        }
+        return;
+      }
+      if (req.method === 'GET' && route === '/api/update/fetch') {
+        const m = readManifest();
+        if (!m) return json(res, 404, { error: 'no update published' });
+        const downloads = path.join(os.homedir(), 'Downloads');
+        const target = path.join(downloads, m.artifact);
+        try {
+          if (opts.updateUrl) {
+            const dl = `${opts.updateUrl.replace(/\/+$/, '')}/api/update/download`;
+            const token = updateToken(opts.updateUrl);
+            const remote = await fetch(dl, {
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+              signal: AbortSignal.timeout(120_000),
+            });
+            if (!remote.ok) throw new Error(`download failed: HTTP ${remote.status}`);
+            await fs.mkdir(downloads, { recursive: true });
+            await fs.writeFile(target, Buffer.from(await remote.arrayBuffer()));
+          } else {
+            await fs.mkdir(downloads, { recursive: true });
+            await fs.copyFile(artifactPath(m), target);
+          }
+          if (process.platform === 'darwin') execFile('open', [target], () => {});
+          return json(res, 200, { savedTo: target, artifact: m.artifact });
+        } catch (err) {
+          return json(res, 502, { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
       if (req.method === 'POST' && route === '/api/chat') {
         const body = await readJson(req);
         const message = String(body.message ?? '');

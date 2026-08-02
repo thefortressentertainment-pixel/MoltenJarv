@@ -555,15 +555,56 @@ async function init() {
   bindPanel();
   bindNew();
   bindVoice();
+  bindUpdate();
   await loadSession();
   await refreshStatus();
   input.focus();
   runDeepLinkTask();
+  checkForUpdate();
+}
+
+// Ask the hub whether a newer build is published (this hub checks its update
+// server) and offer to download + install it when one is available.
+async function checkForUpdate() {
+  try {
+    const res = await fetch('/api/update/status');
+    if (!res.ok) return;
+    const s = await res.json();
+    if (s.available && s.latest) {
+      let msg = `Jarv Genie v${s.latest} is available (you're on v${s.current})`;
+      if (s.notes) msg += ` — ${s.notes}`;
+      $('updateText').textContent = msg;
+      $('updateBtn').textContent = `Download v${s.latest}`;
+      $('updateBanner').classList.remove('hidden');
+    }
+  } catch { /* the hub's update check is best-effort */ }
+}
+
+function bindUpdate() {
+  $('updateBtn').addEventListener('click', async () => {
+    const btn = $('updateBtn');
+    btn.disabled = true;
+    btn.textContent = 'Downloading…';
+    try {
+      const res = await fetch('/api/update/fetch');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      $('updateText').textContent = `Saved ${data.artifact} — the installer is opening.`;
+      btn.classList.add('hidden');
+    } catch (err) {
+      $('updateText').textContent = `Download failed: ${err.message}`;
+      btn.disabled = false;
+      btn.textContent = 'Try again';
+    }
+  });
+  $('updateDismiss').addEventListener('click', () => {
+    $('updateBanner').classList.add('hidden');
+  });
 }
 
 // A jarvgenie:// link can hand the chat a task to run immediately, e.g.
-// "jarvgenie://run?task=Open%20the%20calculator". The task arrives as a
-// ?task= query parameter on this page's URL.
+// "jarvgenie://run?task=Start%20my%20music". The task arrives as a ?task=
+// query parameter on this page's URL.
 function runDeepLinkTask() {
   const task = new URLSearchParams(location.search).get('task');
   if (!task) return;

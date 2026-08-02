@@ -65,6 +65,20 @@ body {
 
 .top-actions { display: flex; gap: 8px; }
 
+/* Update banner */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+.update-banner.hidden { display: none; }
+.update-banner .update-text { flex: 1; font-size: 13px; color: var(--text-dim); }
+.update-banner .btn.hidden { display: none; }
+.btn.small { padding: 4px 10px; font-size: 12px; }
+
 /* Buttons */
 .btn {
   background: var(--bg-panel);

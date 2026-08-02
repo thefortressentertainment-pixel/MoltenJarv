@@ -10,6 +10,7 @@ import {
 } from './cli/agent.js';
 import { localBackend, remoteBackend } from './cli/backend.js';
 import { runKeyCommand } from './cli/keys.js';
+import { runUpdateCommand } from './cli/update.js';
 import { runSidecar, sendNotify } from './cli/sidecar.js';
 import { addMonitor, printMonitors, removeMonitor, runMonitorDaemon } from './cli/monitor.js';
 import { runVoiceSession, runWakeSession, type VoiceSessionOptions } from './cli/voice.js';
@@ -44,6 +45,10 @@ Usage:
   jarv-genie notify "text" [--device NAME] [--speak] [--remote]   push to connected devices
   jarv-genie monitor [add <dir|web|metric> <target> "<prompt>" [--every N] [--notify] [--speak] | list | remove <id>]   long-horizon watches
   jarv-genie monitor    run the monitor daemon (fires when a watched target changes)
+  jarv-genie update publish <file> [--version X] [--notes "..."]   stage a build for distribution
+  jarv-genie update list          show what's published for updates
+  jarv-genie update check [--url <hub>] [--remote]   check for a newer build
+  jarv-genie hub --update-url <hub>   auto-check this update server for new builds
   jarv-genie voice [--voice N] [--no-tts] [--remote] [--live] [--wake [--wake-phrase "..."] [--quiet]] [--setup-piper]   talk to the brain out loud
   jarv-genie voice --live   show live captions as you speak (streaming STT)
   jarv-genie voice --wake   hands-free: answers when you say "hey jarv" (wake word)
@@ -116,6 +121,7 @@ function parseHubArgs(argv: string[]): UiServerOptions & { token?: boolean; newT
     else if (a === '--auth') out.auth = true;
     else if (a === '--token') out.token = true;
     else if (a === '--new-token') out.newToken = true;
+    else if (a === '--update-url') out.updateUrl = argv[++i];
   }
   return out;
 }
@@ -178,6 +184,11 @@ async function main(): Promise<void> {
 
   if (raw[0] === 'key') {
     await runKeyCommand(raw.slice(1));
+    return;
+  }
+
+  if (raw[0] === 'update') {
+    await runUpdateCommand(raw.slice(1));
     return;
   }
 

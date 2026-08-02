@@ -86,6 +86,21 @@ sub-second, private. Shipped (`jarv-genie voice`):
       sidecar`) deliver pushes to any machine; `jarv-genie notify` fans out; the
       agent daemon pushes deliveries to sidecars when running with `--remote`
 
+## App shell & distribution
+
+- [x] Native dock app with voice: the Tauri app ships microphone + screen
+      permissions; the chat window's mic button records, transcribes, answers,
+      and speaks replies, plus a hands-free Voice toggle
+- [x] In-app voice API on the hub (`/api/voice/transcribe`, `/api/voice/speak`)
+      so voice works in any browser, not just the CLI
+- [x] Deep links — `jarvgenie://run?task=...` links anywhere launch the app,
+      ensure the hub is running, and auto-submit the task into the chat
+- [x] Global updater — `jarv-genie update publish` stages an installer on the
+      hub (`/api/update`); hubs linked to it (or pointed with
+      `--update-url`) auto-detect the newer version and prompt the chat UI to
+      download + open it (`/api/update/fetch`). `jarv-genie update check` from
+      any terminal
+
 ## v5 — Learning
 
 - Improve the local configuration from usage traces (OpenJarvis-style
