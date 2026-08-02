@@ -147,6 +147,31 @@ Rebuild the app after hub upgrades: `cd desktop && npm run build` (or `npx tauri
 build`). The app needs Microphone (and optionally Screen Recording) permission
 the first time you use voice.
 
+### Task links — click a link, Jarv Genie runs it
+
+The app registers the `jarvgenie://` URL scheme, so any hyperlink — on a web
+page, in a doc or email, or from the terminal — can launch the app and hand it
+a task to run. No typing:
+
+```
+jarvgenie://run?task=<url-encoded command>
+```
+
+```html
+<a href="jarvgenie://run?task=Open%20the%20calculator">Open the calculator</a>
+<a href="jarvgenie://run?task=What%20time%20is%20it">What time is it?</a>
+```
+
+Clicking the link starts the app (or brings it to the front), makes sure the
+hub is running, then sends the task straight into the chat. From the terminal:
+
+```bash
+open "jarvgenie://run?task=Open%20the%20calculator"
+```
+
+Any command you can type in the chat — questions, reminders, tool calls,
+monitors — can ride in on a link.
+
 ### Voice — talk to it out loud
 
 A fully local voice loop on the hub machine: mic → transcription → agent →

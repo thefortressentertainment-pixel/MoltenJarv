@@ -20,6 +20,13 @@
       "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:3001; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
     }
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["jarvgenie"]
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["app", "dmg"],

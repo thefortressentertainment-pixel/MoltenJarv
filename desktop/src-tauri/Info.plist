@@ -6,5 +6,16 @@
   <string>Jarv Genie listens for your voice commands so you can talk to it hands-free.</string>
   <key>NSScreenCaptureUsageDescription</key>
   <string>Jarv Genie captures the screen when you ask it to look at what is on display.</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>Jarv Genie task launcher</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>jarvgenie</string>
+      </array>
+    </dict>
+  </array>
 </dict>
 </plist>

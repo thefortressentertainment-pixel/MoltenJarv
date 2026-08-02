@@ -558,6 +558,21 @@ async function init() {
   await loadSession();
   await refreshStatus();
   input.focus();
+  runDeepLinkTask();
+}
+
+// A jarvgenie:// link can hand the chat a task to run immediately, e.g.
+// "jarvgenie://run?task=Open%20the%20calculator". The task arrives as a
+// ?task= query parameter on this page's URL.
+function runDeepLinkTask() {
+  const task = new URLSearchParams(location.search).get('task');
+  if (!task) return;
+  const params = new URLSearchParams(location.search);
+  params.delete('task');
+  const next = location.pathname + (params.toString() ? `?${params}` : '');
+  history.replaceState(null, '', next);
+  input.value = task;
+  send();
 }
 
 init();
