@@ -52,7 +52,7 @@ export async function snapshotState(kind: MonitorKind, target: string): Promise<
   try {
     if (kind === 'dir') {
       const entries = walkDir(target);
-      return hashText(entries.map((e) => `${e.path}:${e.size}:${e.mtimeMs}`).join('\n'));
+      return hashText(entries.map((e) => `${e.path}:${e.size}:${e.mtimeMs}:${e.contentHash}`).join('\n'));
     }
     if (kind === 'web') {
       return hashText(await fetchText(target));
@@ -191,6 +191,8 @@ interface DirEntry {
   size: number;
   mtime: Date;
   mtimeMs: number;
+  /** Content hash for small files so same-timestamp edits still fire. */
+  contentHash: string;
 }
 
 function walkDir(dir: string): DirEntry[] {
@@ -202,7 +204,15 @@ function walkDir(dir: string): DirEntry[] {
       if (st.isDirectory()) {
         walk(full);
       } else {
-        out.push({ path: full, size: st.size, mtime: st.mtime, mtimeMs: Math.round(st.mtimeMs) });
+        let contentHash = '';
+        if (st.size <= 1_048_576) {
+          try {
+            contentHash = createHash('sha256').update(fs.readFileSync(full)).digest('hex');
+          } catch {
+            // unreadable file — fall back to metadata only
+          }
+        }
+        out.push({ path: full, size: st.size, mtime: st.mtime, mtimeMs: st.mtimeMs, contentHash });
       }
     }
   };

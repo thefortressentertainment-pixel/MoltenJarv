@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Jarv Genie listens for your voice commands so you can talk to it hands-free.</string>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>Jarv Genie captures the screen when you ask it to look at what is on display.</string>
+</dict>
+</plist>

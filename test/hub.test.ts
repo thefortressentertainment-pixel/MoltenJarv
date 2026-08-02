@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import { statSync, rmSync, existsSync } from 'node:fs';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -153,5 +153,54 @@ test('ui loopback stays auth-free by default', async () => {
     assert.strictEqual(res.status, 200);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test('voice speak endpoint returns a WAV when TTS is available', async (t) => {
+  const { hasPiper, hasTts } = await import('../src/voice/index.js');
+  if (!hasPiper() && !hasTts()) {
+    t.skip('no TTS on this machine');
+    return;
+  }
+  await withAuthServer(async (url, token) => {
+    const res = await fetch(url + '/api/voice/speak', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'hello there' }),
+    });
+    assert.strictEqual(res.status, 200);
+    assert.match(res.headers.get('content-type') ?? '', /audio\/wav/);
+    const bytes = Buffer.from(await res.arrayBuffer());
+    assert.strictEqual(bytes.toString('ascii', 0, 4), 'RIFF');
+    assert.ok(bytes.length > 44, 'has audio data');
+  });
+});
+
+test('voice transcribe endpoint turns audio into text', async (t) => {
+  const { execFileSync } = await import('node:child_process');
+  const { hasWhisperCli, locateWhisperModel, hasTts } = await import('../src/voice/index.js');
+  if (!hasWhisperCli() || !locateWhisperModel() || !hasTts()) {
+    t.skip('no whisper model or say available');
+    return;
+  }
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'jarv-x-'));
+  const aiff = path.join(dir, 'a.aiff');
+  const wav = path.join(dir, 'a.wav');
+  try {
+    execFileSync('say', ['-o', aiff, 'test one two three']);
+    execFileSync('sox', [aiff, '-r', '16000', '-c', '1', '-b', '16', wav]);
+    const audio = readFileSync(wav);
+    await withAuthServer(async (url, token) => {
+      const res = await fetch(url + '/api/voice/transcribe', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' },
+        body: audio,
+      });
+      assert.strictEqual(res.status, 200);
+      const { text } = (await res.json()) as { text: string };
+      assert.match(text.toLowerCase(), /test/);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

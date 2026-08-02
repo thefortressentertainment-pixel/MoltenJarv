@@ -4,10 +4,12 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { SESSION, type AgentContext } from '../cli/index.js';
 import { VERSION } from '../config/defaults.js';
 import { getTokenStore, type TokenStore } from '../hub/auth.js';
 import { DeviceStore, pushNotify } from '../sidecar/devices.js';
+import { speakToWav, transcribe } from '../voice/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS = new Set(['index.html', 'app.css', 'app.js']);
@@ -103,6 +105,36 @@ function handler(ctx: AgentContext, opts: UiServerOptions, host: string) {
       }
 
       if (await deviceRoutes(req, res, route)) return;
+
+      if (req.method === 'POST' && route === '/api/voice/transcribe') {
+        const buf = await readBodyBuffer(req);
+        const dir = mkdtempSync(path.join(os.tmpdir(), 'jarv-audio-'));
+        const wav = path.join(dir, 'in.wav');
+        try {
+          await fs.writeFile(wav, buf);
+          const text = await transcribe(wav);
+          json(res, 200, { text });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+        return;
+      }
+      if (req.method === 'POST' && route === '/api/voice/speak') {
+        const body = await readJson(req);
+        const text = String(body.text ?? '').trim();
+        if (!text) {
+          json(res, 400, { error: 'text is required' });
+          return;
+        }
+        try {
+          const wav = await speakToWav(text);
+          res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' });
+          res.end(wav);
+        } catch (err) {
+          json(res, 500, { error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
 
       if (req.method === 'GET' && route === '/api/status') return json(res, 200, await status(ctx));
       if (req.method === 'GET' && route === '/api/session') return json(res, 200, await loadSession(ctx));
@@ -240,4 +272,10 @@ function readJson(req: http.IncomingMessage): Promise<Record<string, unknown>> {
     });
     req.on('error', reject);
   });
+}
+
+async function readBodyBuffer(req: http.IncomingMessage): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const c of req) chunks.push(c as Buffer);
+  return Buffer.concat(chunks);
 }

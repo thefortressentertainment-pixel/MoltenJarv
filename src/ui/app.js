@@ -164,9 +164,224 @@ function setStatus(text, kind) {
   pill.className = `status${kind ? ` ${kind}` : ''}`;
 }
 
+// ---------- voice ----------
+const TARGET_RATE = 16000;
+const micBtn = $('micBtn');
+const voiceBtn = $('voiceBtn');
+let wavRec = null;
+let handsFree = false;
+let speakingAudio = null;
+let voiceBusy = false;
+
+function stopPlayback() {
+  if (speakingAudio) {
+    speakingAudio.pause();
+    speakingAudio = null;
+  }
+}
+
+async function apiRaw(path, body) {
+  const res = await fetch(path, {
+    method: 'POST',
+    body,
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (res.status === 401) {
+    const t = window.prompt('This hub requires a token. Paste it (get it with: jarv-genie hub --token):');
+    if (t) {
+      saveToken(t.trim());
+      return apiRaw(path, body);
+    }
+    throw new Error('unauthorized: no token provided');
+  }
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`;
+    try {
+      message = (await res.json()).error || message;
+    } catch {
+      /* keep status fallback */
+    }
+    throw new Error(message);
+  }
+  return res.json();
+}
+
+async function speakReply(text) {
+  if (!text) return;
+  try {
+    const res = await fetch('/api/voice/speak', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    stopPlayback();
+    const url = URL.createObjectURL(blob);
+    speakingAudio = new Audio(url);
+    speakingAudio.onended = () => {
+      URL.revokeObjectURL(url);
+      speakingAudio = null;
+      if (handsFree && !voiceBusy) startListening();
+    };
+    await speakingAudio.play();
+  } catch {
+    /* speaking is best-effort */
+  }
+}
+
+function encodeWav16(pcm) {
+  const buf = new ArrayBuffer(44 + pcm.length * 2);
+  const dv = new DataView(buf);
+  const wstr = (off, s) => {
+    for (let i = 0; i < s.length; i++) dv.setUint8(off + i, s.charCodeAt(i));
+  };
+  wstr(0, 'RIFF');
+  dv.setUint32(4, 36 + pcm.length * 2, true);
+  wstr(8, 'WAVE');
+  wstr(12, 'fmt ');
+  dv.setUint32(16, 16, true);
+  dv.setUint16(20, 1, true);
+  dv.setUint16(22, 1, true);
+  dv.setUint32(24, TARGET_RATE, true);
+  dv.setUint32(28, TARGET_RATE * 2, true);
+  dv.setUint16(32, 2, true);
+  dv.setUint16(34, 16, true);
+  wstr(36, 'data');
+  dv.setUint32(40, pcm.length * 2, true);
+  new Int16Array(buf, 44).set(pcm);
+  return new Blob([buf], { type: 'audio/wav' });
+}
+
+async function createWavRecorder(onDone) {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AudioCtx();
+  await ctx.resume();
+  const src = ctx.createMediaStreamSource(stream);
+  const proc = ctx.createScriptProcessor(4096, 1, 1);
+  const gain = ctx.createGain();
+  gain.gain.value = 0;
+  const inRate = ctx.sampleRate;
+  const chunks = [];
+  let heardVoice = false;
+  let lastVoice = 0;
+  let stopped = false;
+  let maxTimer = null;
+
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    clearTimeout(maxTimer);
+    proc.onaudioprocess = null;
+    try { proc.disconnect(); } catch { /* noop */ }
+    try { src.disconnect(); } catch { /* noop */ }
+    try { gain.disconnect(); } catch { /* noop */ }
+    stream.getTracks().forEach((t) => t.stop());
+    void ctx.close();
+    const total = chunks.reduce((n, c) => n + c.length, 0);
+    const outLen = Math.max(1, Math.floor((total * TARGET_RATE) / inRate));
+    const pcm = new Int16Array(outLen);
+    let srcIdx = 0;
+    for (const c of chunks) {
+      for (let j = 0; j < c.length; j++, srcIdx++) {
+        const dst = Math.floor((srcIdx * TARGET_RATE) / inRate);
+        if (dst >= outLen) break;
+        pcm[dst] = Math.max(-32768, Math.min(32767, Math.round(c[j] * 32767)));
+      }
+    }
+    onDone(encodeWav16(pcm));
+  };
+
+  proc.onaudioprocess = (e) => {
+    const data = e.inputBuffer.getChannelData(0);
+    chunks.push(new Float32Array(data));
+    let rms = 0;
+    for (let i = 0; i < data.length; i += 4) rms += data[i] * data[i];
+    rms = Math.sqrt(rms / (data.length / 4));
+    const now = Date.now();
+    if (rms > 0.012) {
+      heardVoice = true;
+      lastVoice = now;
+    } else if (heardVoice && now - lastVoice > 1400) {
+      stop();
+    }
+  };
+  src.connect(proc);
+  proc.connect(gain);
+  gain.connect(ctx.destination);
+
+  const startTimer = setTimeout(() => stop(), 15000);
+  maxTimer = startTimer;
+  return { stop };
+}
+
+async function startListening() {
+  if (voiceBusy || wavRec) return;
+  voiceBusy = true;
+  setStatus('listening… click to stop', 'mic');
+  micBtn.classList.add('recording');
+  try {
+    wavRec = await createWavRecorder(async (blob) => {
+      wavRec = null;
+      micBtn.classList.remove('recording');
+      setStatus('thinking…', 'mic');
+      let reply = '';
+      try {
+        const res = await apiRaw('/api/voice/transcribe', blob);
+        const text = (res.text || '').trim();
+        if (!text) {
+          setStatus('nothing heard', 'fail');
+        } else {
+          input.value = text;
+          autoGrow();
+          reply = (await send(true)) || '';
+        }
+      } catch (err) {
+        setStatus('voice error', 'fail');
+        addMessage('error', `Voice failed: ${err.message}`);
+      } finally {
+        voiceBusy = false;
+        if (handsFree && reply) {
+          await speakReply(reply);
+        } else if (handsFree) {
+          setStatus('voice on — listening…');
+          startListening();
+        } else {
+          setStatus('idle');
+        }
+      }
+    });
+  } catch (err) {
+    micBtn.classList.remove('recording');
+    voiceBusy = false;
+    setStatus('mic unavailable', 'fail');
+    addMessage('error', `Microphone access failed: ${err.message}`);
+  }
+}
+
+function bindVoice() {
+  micBtn.addEventListener('click', () => {
+    if (speakingAudio) stopPlayback();
+    if (wavRec) {
+      wavRec.stop();
+      return;
+    }
+    if (voiceBusy) return;
+    startListening();
+  });
+  voiceBtn.addEventListener('click', () => {
+    handsFree = !handsFree;
+    voiceBtn.classList.toggle('active', handsFree);
+    setStatus(handsFree ? 'voice on — listening…' : 'idle');
+    if (handsFree && !wavRec && !voiceBusy) startListening();
+    else if (!handsFree && wavRec) wavRec.stop();
+  });
+}
+
 async function send() {
   const text = input.value.trim();
-  if (!text) return;
+  if (!text) return '';
 
   input.value = '';
   autoGrow();
@@ -185,11 +400,14 @@ async function send() {
       const typing = $('typing');
       if (typing) typing.closest('.msg').remove();
       addMessage('assistant', '(no response)');
+      return '';
     }
+    return res.text;
   } catch (err) {
     const typing = $('typing');
     if (typing) typing.closest('.msg').remove();
     addMessage('error', `Jarv Genie could not respond: ${err.message}`);
+    return '';
   } finally {
     sendBtn.disabled = false;
     input.focus();
@@ -336,6 +554,7 @@ async function init() {
   bindComposer();
   bindPanel();
   bindNew();
+  bindVoice();
   await loadSession();
   await refreshStatus();
   input.focus();

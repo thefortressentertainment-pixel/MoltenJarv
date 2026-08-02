@@ -116,23 +116,43 @@ MCP server still work — they now answer to every paired device.
 - Pairing stores the token on the client with `0600` permissions. Rotating the
   hub token invalidates every linked client until you re-link them.
 
-### Native dock app (macOS)
+### Native dock app (macOS) — click to open, talk to use
 
-A Tauri shell wraps the hub as a real dock app. Build it, then the app starts
-`jarv-genie hub` on launch and shows the chat UI in its own window (the hub
-must be installed globally first):
+The fastest way to use Jarv Genie is the native app: double-click it, and a
+chat window opens with a **microphone button** — click it, say your command, and
+Jarv Genie answers out loud. It starts the hub for you, so there is no terminal
+involved.
 
 ```bash
-cd desktop
-npm install
-npm run build
-# opens as desktop/src-tauri/target/release/bundle/macos/JarvGenie.app
+# once (first time):
+npm install -g .                 # install the hub globally (from the repo root)
+jarv-genie voice --setup-piper   # optional: fast neural TTS for replies
+
+# open the app:
+open desktop/src-tauri/target/release/bundle/macos/JarvGenie.app
+# or drag desktop/src-tauri/target/release/bundle/dmg/JarvGenie_0.1.0_aarch64.dmg
+# onto Applications to install it like any other app.
 ```
+
+In the app window:
+
+- **🎙 mic button** — click and talk; it auto-stops when you pause, transcribes,
+  answers in the chat, and reads the reply aloud (Piper or macOS `say`).
+- **Voice toggle** — hands-free mode: after each reply it keeps listening, so
+  you can keep talking without touching anything. Click the mic again to stop.
+- If the hub isn't installed globally yet, the window tells you to run
+  `jarv-genie hub` once from a terminal.
+
+Rebuild the app after hub upgrades: `cd desktop && npm run build` (or `npx tauri
+build`). The app needs Microphone (and optionally Screen Recording) permission
+the first time you use voice.
 
 ### Voice — talk to it out loud
 
 A fully local voice loop on the hub machine: mic → transcription → agent →
-spoken reply.
+spoken reply. The same pipeline powers the app's mic button via the hub
+(`POST /api/voice/transcribe` + `POST /api/voice/speak`), so voice works in any
+browser, too.
 
 ```bash
 brew install sox whisper-cpp

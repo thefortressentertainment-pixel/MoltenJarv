@@ -243,6 +243,46 @@ async function speakPiper(text: string, model: string): Promise<void> {
   }
 }
 
+/**
+ * Render text to a WAV buffer for playback (used by the hub voice endpoint and
+ * any non-macOS surface). Prefers Piper (fast neural); falls back to macOS
+ * `say` converted through sox.
+ */
+export async function speakToWav(text: string, opts: VoiceOptions = {}): Promise<Buffer> {
+  const model = locatePiperVoice();
+  if (hasPiper() && model) {
+    const outWav = path.join(os.tmpdir(), `jarv-wav-${process.pid}-${Date.now()}.wav`);
+    try {
+      await runOrThrow(path.join(PIPER_VENV(), 'bin', 'piper'), ['--model', model, '--output_file', outWav], { input: text });
+      return fs.readFileSync(outWav);
+    } finally {
+      try {
+        fs.unlinkSync(outWav);
+      } catch {
+        // already gone
+      }
+    }
+  }
+  if (hasTts()) {
+    const base = path.join(os.tmpdir(), `jarv-say-${process.pid}-${Date.now()}`);
+    const aiff = base + '.aiff';
+    const wav = base + '.wav';
+    try {
+      await runOrThrow('say', ['-o', aiff, text]);
+      await runOrThrow('sox', [aiff, wav]);
+      return fs.readFileSync(wav);
+    } finally {
+      try {
+        fs.unlinkSync(aiff);
+        fs.unlinkSync(wav);
+      } catch {
+        // already gone
+      }
+    }
+  }
+  throw new Error('no TTS available (Piper or macOS say)');
+}
+
 /** Write a 16-bit mono 16kHz WAV file from raw PCM bytes. */
 export function writeWav(file: string, pcm: Buffer): void {
   const header = Buffer.alloc(44);
