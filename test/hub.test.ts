@@ -30,6 +30,17 @@ function fakeCtx(): AgentContext {
         return 'fake-model';
       },
       setPrimaryModel: (_m: string) => {},
+      chat: async (opts: { messages: Array<{ role: string; content: string }> }) => {
+        const last = opts.messages[opts.messages.length - 1];
+        return { content: `echo: ${last?.content ?? ''}`, toolCalls: null, provider: 'fake', model: 'fake-model' };
+      },
+      streamChat: async (opts: { messages: Array<{ role: string; content: string }> }, onDelta: (d: string) => void) => {
+        const last = opts.messages[opts.messages.length - 1];
+        const content = `echo-stream: ${last?.content ?? ''}`;
+        onDelta('echo-');
+        onDelta('stream');
+        return { content, toolCalls: null, provider: 'fake', model: 'fake-model' };
+      },
     },
     memory: {
       sessionLoad: async () => [],
@@ -137,8 +148,8 @@ test('RemoteClient talks to the hub with its token', async () => {
 
     const deltas: string[] = [];
     const streamed = await good.chatStream('hi', (d) => deltas.push(d));
-    assert.deepStrictEqual(deltas, ['echo-', 'stream']);
-    assert.strictEqual(streamed.text, 'echo-stream');
+    assert.deepStrictEqual(deltas, ['echo: hi']);
+    assert.strictEqual(streamed.text, 'echo: hi');
     assert.strictEqual(streamed.model, 'fake-model');
 
     const bad = new RemoteClient(url, 'jarv-nope');

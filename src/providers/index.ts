@@ -1,4 +1,5 @@
-import type { JarvGenieConfig } from '../config/index.js';
+import type { JarvGenieConfig, EndpointConfig } from '../config/index.js';
+import { resolveApiKey } from '../config/index.js';
 import { OpenAICompatibleProvider } from './openai.js';
 import type { ChatOptions, Provider } from './types.js';
 import type { ChatResult } from '../agent/types.js';
@@ -8,6 +9,12 @@ export interface DoctorEntry {
   model: string;
   ok: boolean;
   error?: string;
+}
+
+/** Only use the fallback when it can actually authenticate (or needs no key). */
+function fallbackReady(cfg: EndpointConfig): boolean {
+  if (!cfg.apiKey && !cfg.apiKeyEnv) return true;
+  return Boolean(resolveApiKey(cfg));
 }
 
 /**
@@ -21,7 +28,7 @@ export class ModelRouter {
 
   constructor(config: JarvGenieConfig) {
     this.primary = new OpenAICompatibleProvider('primary', 'Primary', config.providers.primary);
-    this.fallback = config.providers.fallback
+    this.fallback = config.providers.fallback && fallbackReady(config.providers.fallback)
       ? new OpenAICompatibleProvider('fallback', 'Fallback', config.providers.fallback)
       : null;
   }

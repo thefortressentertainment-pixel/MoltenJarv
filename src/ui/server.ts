@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { SESSION, type AgentContext } from '../cli/index.js';
+import { TaskRunner } from '../agent/taskrunner.js';
 import { VERSION } from '../config/defaults.js';
 import { getTokenStore, type TokenStore } from '../hub/auth.js';
 import { getLinkStore } from '../remote/client.js';
@@ -206,9 +207,10 @@ function handler(ctx: AgentContext, opts: UiServerOptions, host: string) {
         const body = await readJson(req);
         const message = String(body.message ?? '');
         if (!message.trim()) return json(res, 400, { error: 'message is required' });
-        if (body.stream === true) return await streamChat(res, req, ctx, message);
+        const runner = new TaskRunner({ router: ctx.router, tools: ctx.tools, memory: ctx.memory, config: ctx.config });
+        if (body.stream === true) return await streamChat(res, req, runner, message);
         try {
-          const result = await ctx.agent.run(message, SESSION);
+          const result = await runner.run(message);
           return json(res, 200, result);
         } catch (err) {
           return json(res, 502, { error: err instanceof Error ? err.message : String(err) });
@@ -234,7 +236,7 @@ function handler(ctx: AgentContext, opts: UiServerOptions, host: string) {
   };
 }
 
-async function streamChat(res: http.ServerResponse, req: http.IncomingMessage, ctx: AgentContext, message: string): Promise<void> {
+async function streamChat(res: http.ServerResponse, req: http.IncomingMessage, runner: TaskRunner, message: string): Promise<void> {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -251,7 +253,7 @@ async function streamChat(res: http.ServerResponse, req: http.IncomingMessage, c
     res.write(`data: ${JSON.stringify(data)}\n\n`);
   };
   try {
-    const result = await ctx.agent.runStream(message, SESSION, (delta) => send({ text: delta }));
+    const result = await runner.runStream(message, (delta) => send({ text: delta }));
     send({ meta: { provider: result.provider, model: result.model, steps: result.steps, toolCalls: result.toolCalls } });
     send({ done: true });
     res.end();

@@ -134,4 +134,28 @@ Be honest: only ever claim an action succeeded if its tool result says it did.`;
     const reported = await this.report(input, results);
     return { text: reported.text, steps: 2, toolCalls: calls.length, provider: reported.provider, model: reported.model };
   }
+
+  /**
+   * Same plan→execute→report flow, but streams the final report's text deltas
+   * via `onDelta`. Planning and execution are hidden; only the summary streams.
+   */
+  async runStream(input: string, onDelta: (delta: string) => void): Promise<TaskResult> {
+    const { calls, answer, provider, model } = await this.plan(input);
+
+    if (!calls || calls.length === 0) {
+      onDelta(answer || '(no response)');
+      return { text: answer || '(no response)', steps: 1, toolCalls: 0, provider, model };
+    }
+
+    const results = await this.execute(calls);
+    const system =
+      'You are reporting what was just executed on the user\'s machine. Summarize concisely and naturally what happened and the outcome. If a step failed, was denied, or did nothing, say so honestly — never claim something succeeded that did not.';
+    const messages: ChatMessage[] = [
+      { role: 'system', content: system },
+      { role: 'user', content: `Request: ${input}\n\nTool results:\n${JSON.stringify(results, null, 2)}` },
+    ];
+    const chat = await this.opts.router.streamChat({ messages, tools: [] }, onDelta);
+    const text = (chat.content ?? '').trim();
+    return { text: text || 'Done.', steps: 2, toolCalls: calls.length, provider: chat.provider, model: chat.model };
+  }
 }

@@ -3,7 +3,7 @@
 Goal: Jarv can do anything the user can do on this Mac, from anywhere, with
 explicit consent from Telegram — and can keep improving itself.
 
-Status of each item: `[x]` done, `[ ]` open, `[~]` needs a key/config.
+Status of each item: `[x]` done, `[ ]` open.
 
 ## Capability: full Mac control (Jarv "at the wheel")
 
@@ -15,34 +15,36 @@ Status of each item: `[x]` done, `[ ]` open, `[~]` needs a key/config.
 - [x] Reminders (create/list/delete) and scheduler (cron, names accepted)
 - [x] Web (search + read), email (SMTP/IMAP), Moltbook, voice, memory, monitors
 - [x] `jarv-genie perms` one-time macOS permission setup (Accessibility OK)
-- [x] Reliability: TaskRunner (plan→execute→report), honest failures, empty-output
-      nudge, no fake tool calls
+- [x] Reliability: TaskRunner (plan→execute→report) on BOTH Telegram and the
+      web hub; honest failures; empty-output nudge; no fake tool calls
+- [x] Resource discipline: memory guard cleans up before tasks; busy-lock stops
+      schedule pile-up; drawings self-prune
 
 ## Capability: model that can actually think
 
-- [~] Make DeepSeek the working brain. The local `qwen2.5:3b` is too weak for
-      real self-optimization (it fakes work, invents args, gives up).
-      Unlock: `jarv-genie key set DEEPSEEK_API_KEY <key>` — already configured
-      as the fallback provider. Decide routing: DeepSeek for tool-heavy tasks,
-      local model for casual chat.
-- [ ] Route the TaskRunner planner/report to the strong model only, keeping the
-      local model for chat — the deliberation runs on DeepSeek.
+- [x] DeepSeek is the working brain (primary `deepseek-chat`), with the free
+      local `qwen2.5:3b` as the offline fallback. Router only arms the fallback
+      when a key is actually configured.
+- [x] TaskRunner planner/report run on the strong model (DeepSeek), so the
+      deliberation is real. `self_review` verified healthy on DeepSeek.
 
 ## Capability: proactive (not just reactive)
 
-- [ ] `telegram_send` tool so Jarv can message the owner on its own (scheduled
-      results, alerts, optimization reports) instead of only replying.
-- [ ] Self-review scheduled task: open VSCodium at the repo, run `npm test`,
-      review status, report to the owner, propose next optimization.
+- [x] `telegram_send` tool so Jarv messages the owner on its own.
+- [x] Self-review scheduled task (daily 07:30): Jarv runs `self_review`, reports
+      health + the top next optimization to the owner on Telegram. VSCodium
+      deliberation stays on-demand (auto-opening it daily is a nuisance).
 
 ## Process
 
-Deliberation happens in VSCodium (`/Users/tfe/jarv-genie`). Jarv reads this
-file, the source, and the tests; proposes a change; gets consent; applies it;
-runs `npm test`; and reports back. Iterate.
+Deliberation happens in VSCodium (`/Users/tfe/jarv-genie`) on demand. Jarv reads
+this file, the source, and the tests; proposes a change; gets consent; applies
+it; runs `self_review`; and reports back. Iterate.
 
 ## Current health
 
-- Tests: 101 passing
-- Model: qwen2.5:3b (primary) / deepseek-chat (fallback, awaiting key)
-- Tools: 40+; consent gate armed via Telegram (@MoltenJarvbot)
+- Tests: 119 passing
+- Model: deepseek-chat (primary) / qwen2.5:3b (local fallback)
+- Tools: 53; consent gate armed via Telegram (@MoltenJarvbot)
+- Services: hub (always-on, 0.0.0.0), heartbeat (schedules), telegram bridge
+  (keep-awake), keepawake — all with full PATH via launchd
