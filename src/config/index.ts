@@ -72,7 +72,7 @@ export function defaultConfig(): JarvGenieConfig {
     embeddings: null,
     agent: {
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
-      maxSteps: 8,
+      maxSteps: 16,
       workdir: envOr('JARV_GENIE_WORKDIR', path.join(dataHome(), 'workspace')),
       soulPath: path.join(dataHome(), 'soul'),
     },
