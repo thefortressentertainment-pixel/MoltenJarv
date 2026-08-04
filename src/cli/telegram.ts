@@ -27,6 +27,21 @@ function verdict(text: string): boolean | null {
   return null;
 }
 
+/** Telegram caps a message at 4096 chars — split longer text into chunks. */
+export function chunkText(text: string, max = 4000): string[] {
+  const out: string[] = [];
+  let rest = text;
+  while (rest.length > max) {
+    let cut = rest.lastIndexOf('\n', max);
+    if (cut < max * 0.5) cut = rest.lastIndexOf(' ', max);
+    if (cut < max * 0.5) cut = max;
+    out.push(rest.slice(0, cut));
+    rest = rest.slice(cut).trimStart();
+  }
+  if (rest) out.push(rest);
+  return out;
+}
+
 function usage(): string {
   return (
     'Telegram bridge needs a bot token:\n' +
@@ -108,11 +123,15 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
       if (guard === 'cleaned') process.stdout.write('[jarv-genie] freed memory before task\n');
       const result = await runner.run(text);
       process.stdout.write(`[jarv-genie] telegram -> ${(result.text || '(no response)').slice(0, 160)}\n`);
-      await client.sendMessage(chatId!, result.text || '(no response)');
+      for (const part of chunkText(result.text || '(no response)')) {
+        await client.sendMessage(chatId!, part);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       process.stdout.write(`[jarv-genie] telegram ERROR: ${message}\n`);
-      await client.sendMessage(chatId!, `⚠️ ${message}`);
+      for (const part of chunkText(`⚠️ ${message}`)) {
+        await client.sendMessage(chatId!, part);
+      }
     } finally {
       if (acquired) releaseBusy();
     }

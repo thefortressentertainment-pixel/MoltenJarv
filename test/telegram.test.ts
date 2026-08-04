@@ -3,7 +3,20 @@ import { test } from 'node:test';
 import { TelegramClient } from '../src/telegram/client.js';
 import { approvalActive, requireApproval, setApprovalHandler } from '../src/approvals.js';
 import { Agent } from '../src/agent/agent.js';
+import { chunkText } from '../src/cli/telegram.js';
 import type { ChatMessage } from '../src/agent/types.js';
+
+test('long text is split into Telegram-safe chunks', () => {
+  const long = 'a'.repeat(9000);
+  const parts = chunkText(long);
+  assert.ok(parts.length >= 3, `9000 chars should split into ~3 parts, got ${parts.length}`);
+  for (const p of parts) assert.ok(p.length <= 4000, `chunk too long: ${p.length}`);
+  assert.strictEqual(parts.join('').length, 9000, 'chunks reassemble the full text');
+});
+
+test('short text stays one chunk', () => {
+  assert.deepStrictEqual(chunkText('hi there'), ['hi there']);
+});
 
 function withFetchStub(stub: (url: string, init?: { method?: string; body?: string }) => { ok: boolean; result?: unknown; description?: string }, fn: () => Promise<void>): Promise<void> {
   const original = globalThis.fetch;
