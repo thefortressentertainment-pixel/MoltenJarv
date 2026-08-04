@@ -15,6 +15,7 @@ import { ToolRegistry } from '../tools/registry.js';
 import { timeTools } from '../tools/time.js';
 import { webTools } from '../tools/web.js';
 import { moltbookTools } from '../tools/moltbook.js';
+import { emailTools } from '../tools/email.js';
 
 const SESSION = 'default';
 
@@ -33,7 +34,7 @@ export async function buildAgent(): Promise<AgentContext> {
   const memory = buildMemory(config);
 
   const registry = new ToolRegistry();
-  registry.registerMany([...timeTools(), ...fileTools(), ...memoryTools(), ...webTools(), ...speechTools(), ...computerTools(), ...moltbookTools()]);
+  registry.registerMany([...timeTools(), ...fileTools(), ...memoryTools(), ...webTools(), ...speechTools(), ...computerTools(), ...moltbookTools(), ...emailTools()]);
 
   const { tools: externalTools, errors: externalErrors } = await loadExternalMcpTools(config.mcp.servers);
   registry.registerMany(externalTools);
