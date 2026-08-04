@@ -212,5 +212,68 @@ export function systemTools(): ToolDefinition[] {
         return { ok: true, text: res.stdout };
       },
     },
+    {
+      name: 'file_find',
+      description:
+        'Search the Mac (Spotlight/mdfind) for files and return paths. Read-only. Great for "find my resume" or locating anything on disk.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query (filename or content term).' },
+          maxResults: { type: 'number', description: 'Max results (default 20).' },
+        },
+        required: ['query'],
+      },
+      handler: async (args) => {
+        const query = String(args.query ?? '').trim();
+        if (!query) return { ok: false, error: 'file_find requires a query' };
+        const maxResults = Math.max(1, Math.min(100, Math.trunc(Number(args.maxResults ?? 20) || 20)));
+        const res = await execFileAsync('mdfind', ['-name', query, '-limit', String(maxResults)]);
+        const paths = res.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+        return { ok: true, count: paths.length, paths };
+      },
+    },
+    {
+      name: 'file_zip',
+      description: 'Create a zip archive of a file or folder. REQUIRES explicit user consent when a remote channel is active.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          source: { type: 'string', description: 'File or folder to zip.' },
+          destination: { type: 'string', description: 'Output .zip path.' },
+        },
+        required: ['source', 'destination'],
+      },
+      consequential: true,
+      handler: async (args) => {
+        const source = path.resolve(String(args.source ?? '').trim());
+        const destination = path.resolve(String(args.destination ?? '').trim());
+        if (!source || !destination) return { ok: false, error: 'file_zip requires source and destination' };
+        await fs.mkdir(path.dirname(destination), { recursive: true });
+        await execFileAsync('zip', ['-r', '-q', destination, source]);
+        return { ok: true, source, destination };
+      },
+    },
+    {
+      name: 'file_unzip',
+      description: 'Extract a zip archive to a destination folder. REQUIRES explicit user consent when a remote channel is active.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          source: { type: 'string', description: 'The .zip file.' },
+          destination: { type: 'string', description: 'Folder to extract into.' },
+        },
+        required: ['source', 'destination'],
+      },
+      consequential: true,
+      handler: async (args) => {
+        const source = path.resolve(String(args.source ?? '').trim());
+        const destination = path.resolve(String(args.destination ?? '').trim());
+        if (!source || !destination) return { ok: false, error: 'file_unzip requires source and destination' };
+        await fs.mkdir(destination, { recursive: true });
+        await execFileAsync('unzip', ['-o', '-q', source, '-d', destination]);
+        return { ok: true, source, destination };
+      },
+    },
   ];
 }

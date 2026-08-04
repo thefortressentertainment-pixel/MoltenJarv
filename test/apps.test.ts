@@ -57,9 +57,24 @@ test('app_command system knows wifi/bluetooth/dnd/emptyTrash actions (validates 
   const old = process.env.JARV_GENIE_NO_OPEN;
   process.env.JARV_GENIE_NO_OPEN = '1';
   try {
-    for (const action of ['wifiOn', 'wifiOff', 'bluetoothOn', 'bluetoothOff', 'dndOn', 'emptyTrash']) {
+    for (const action of ['wifiOn', 'wifiOff', 'bluetoothOn', 'bluetoothOff', 'dndOn', 'emptyTrash', 'restart', 'screenshot']) {
       const res = (await cmd.handler({ app: 'system', action }, ctx)) as { ok: boolean; error?: string };
       assert.strictEqual(res.ok, true, `${action} must be a valid system action`);
+    }
+  } finally {
+    if (old === undefined) delete process.env.JARV_GENIE_NO_OPEN;
+    else process.env.JARV_GENIE_NO_OPEN = old;
+  }
+});
+
+test('new app recipes exist (mail, maps, textedit, etc.)', async () => {
+  const cmd = appsTools().find((t) => t.name === 'app_command')!;
+  const old = process.env.JARV_GENIE_NO_OPEN;
+  process.env.JARV_GENIE_NO_OPEN = '1';
+  try {
+    for (const app of ['mail', 'maps', 'textedit', 'contacts', 'podcasts', 'facetime']) {
+      const res = (await cmd.handler({ app, action: 'open' }, ctx)) as { ok: boolean; error?: string };
+      assert.strictEqual(res.ok, true, `${app} open must be valid`);
     }
   } finally {
     if (old === undefined) delete process.env.JARV_GENIE_NO_OPEN;

@@ -11,7 +11,7 @@ Legend for consent: **R** = read-only (never prompts) · **C** = consent-gated
 
 | Manual ability | Jarv command | Consent |
 | --- | --- | --- |
-| Open / quit any app | `app_command` open / quit (Spotify, Music, Notes, Messages, Safari, Chrome, Calendar, Calculator, Clock, Preview, Finder, Terminal, VSCodium, System Settings, Photos) | C |
+| Open / quit any app | `app_command` open / quit (Spotify, Music, Notes, Messages, Safari, Chrome, Calendar, Calculator, Clock, Preview, Finder, Terminal, VSCodium, System Settings, Photos, Mail, FaceTime, TextEdit, Stickies, Contacts, Activity Monitor, Podcasts, Maps) | C |
 | Play / pause / next / prev music | `app_command` spotify|music play/playPause/next/prev | C |
 | Play a playlist / Liked Songs | `app_command` spotify play uri=spotify:likedsongs; music play playlist= | C |
 | What's playing / is it running | `app_status` (read-only) | R |
@@ -25,7 +25,7 @@ Legend for consent: **R** = read-only (never prompts) · **C** = consent-gated
 
 | Manual ability | Jarv command | Consent |
 | --- | --- | --- |
-| Sleep the Mac | `app_command` system sleep | C |
+| Sleep / restart / lock / display sleep | `app_command` system sleep/restart/lock/displaySleep | C |
 | Lock the screen | `app_command` system lock | C |
 | Sleep the display | `app_command` system displaySleep | C |
 | Set volume (exact / up / down / mute) | `app_command` system volumeSet/volumeUp/volumeDown/mute/unmute | C |
@@ -36,6 +36,7 @@ Legend for consent: **R** = read-only (never prompts) · **C** = consent-gated
 | Wi-Fi / Bluetooth / volume status | `app_status` system | R |
 | Do Not Disturb on / off | `app_command` system dndOn/dndOff | C |
 | Empty the Trash | `app_command` system emptyTrash | C |
+| Take a screenshot (saved) | `app_command` system screenshot | C |
 
 ## Files
 
@@ -43,6 +44,8 @@ Legend for consent: **R** = read-only (never prompts) · **C** = consent-gated
 | --- | --- | --- |
 | Browse / read / write / delete | `file_read_any` · `file_list_any` · `file_write_any` · `file_delete_any` | R / R / C / C |
 | Move / rename / copy | `file_move_any` · `file_copy_any` | C |
+| Find files (Spotlight) | `file_find` | R |
+| Zip / unzip | `file_zip` · `file_unzip` | C |
 | Open a file in its app | `open_file` | C |
 | Reveal in Finder | `reveal_in_finder` | C |
 | Run a command | `run_shell` | C |

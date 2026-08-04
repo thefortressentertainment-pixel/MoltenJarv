@@ -92,6 +92,14 @@ const APP_RECIPES: Record<string, Recipe> = {
   vscodium: { aliases: ['vscodium', 'vs code'], app: 'VSCodium' },
   settings: { aliases: ['settings', 'system settings'], app: 'System Settings' },
   photos: { aliases: ['photos'], app: 'Photos' },
+  mail: { aliases: ['mail'], app: 'Mail' },
+  faceTime: { aliases: ['facetime'], app: 'FaceTime' },
+  textEdit: { aliases: ['textedit', 'text edit'], app: 'TextEdit' },
+  stickies: { aliases: ['stickies'], app: 'Stickies' },
+  contacts: { aliases: ['contacts'], app: 'Contacts' },
+  activityMonitor: { aliases: ['activity monitor'], app: 'Activity Monitor' },
+  podcasts: { aliases: ['podcasts'], app: 'Podcasts' },
+  maps: { aliases: ['maps'], app: 'Maps' },
 };
 
 /** Build a locale-independent AppleScript date from an ISO string. */
@@ -136,9 +144,15 @@ const SYSTEM_ACTIONS: Record<string, Builder> = {
   dndOn: () => 'do shell script "defaults -currentHost write com.apple.notificationcenterui doNotDisturb -boolean true && killall NotificationCenter"',
   dndOff: () => 'do shell script "defaults -currentHost write com.apple.notificationcenterui doNotDisturb -boolean false && killall NotificationCenter"',
   emptyTrash: () => 'do shell script "find ~/.Trash -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null"',
+  restart: () => 'do shell script "sudo -n /sbin/shutdown -r now"',
+  screenshot: () => 'do shell script "mkdir -p \\"$HOME/.jarv-genie/workspace\\" && screencapture -x \\"$HOME/.jarv-genie/workspace/screenshot.png\\""',
 };
 
 const SYSTEM_ACTIONS_LIST = Object.keys(SYSTEM_ACTIONS).join(', ');
+
+function screenshotPath(): string {
+  return `${process.env.HOME ?? ''}/.jarv-genie/workspace/screenshot.png`;
+}
 
 function findRecipe(app: string): { key: string; recipe: Recipe } | null {
   const q = app.trim().toLowerCase();
@@ -163,7 +177,7 @@ export function appsTools(): ToolDefinition[] {
       description:
         `Drive an app or the system with one curated command — the manual actions a person would take. Apps: ${ALL_APPS}. Every app supports open and quit. ` +
         'Spotify/Music: play (uri), playPause, next, prev. Notes: newNote. Messages: send. Safari/Chrome: openUrl, newTab, back, forward. Calendar: addEvent (title, date). ' +
-        `System: sleep, lock, displaySleep, volumeSet (value 0-100), volumeUp/Down, mute, unmute, brightnessUp/Down, clipboardSet, wifiOn/wifiOff, bluetoothOn/bluetoothOff, dndOn/dndOff, emptyTrash. ` +
+        'System: sleep, lock, displaySleep, volumeSet (value 0-100), volumeUp/Down, mute, unmute, brightnessUp/Down, clipboardSet, wifiOn/wifiOff, bluetoothOn/bluetoothOff, dndOn/dndOff, emptyTrash, restart, screenshot (saves to workspace). ' +
         'One call does the whole action — no UI clicking. Setting volume never changes playback. REQUIRES consent.',
       inputSchema: {
         type: 'object',
@@ -188,9 +202,12 @@ export function appsTools(): ToolDefinition[] {
 
         if (app === 'system' || app === 'mac') {
           const builder = SYSTEM_ACTIONS[action];
-          if (!builder) return { ok: false, error: `no system action "${action}" — supported: ${Object.keys(SYSTEM_ACTIONS).join(', ')}` };
+          if (!builder) return { ok: false, error: `no system action "${action}" — supported: ${SYSTEM_ACTIONS_LIST}` };
           try {
             await runOrSkip(builder(args));
+            if (action === 'screenshot') {
+              return { ok: true, app: 'system', action, path: screenshotPath() };
+            }
             return { ok: true, app: 'system', action };
           } catch (err) {
             return { ok: false, error: err instanceof Error ? err.message : String(err) };
