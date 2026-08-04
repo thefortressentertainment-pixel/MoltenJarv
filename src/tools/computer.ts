@@ -1,9 +1,13 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { ToolContext, ToolDefinition } from '../agent/types.js';
 import type { JarvGenieConfig } from '../config/index.js';
 import { controlAllowed, describeScreen, openApp, runAppleScript, screenshot } from '../computer/index.js';
+
+const execFileAsync = promisify(execFile);
 
 export function computerTools(): ToolDefinition[] {
   return [
@@ -61,15 +65,7 @@ export function computerTools(): ToolDefinition[] {
       consequential: true,
       handler: async () => {
         try {
-          await openApp('Clock');
-          // Best-effort: click the Alarms tab (requires Accessibility permission).
-          try {
-            await runAppleScript(
-              'tell application "System Events"\n  tell process "Clock"\n    try\n      click button "Alarms" of toolbar 1 of window 1\n    end try\n  end tell\nend tell',
-            );
-          } catch {
-            // tab click is optional
-          }
+          await execFileAsync('open', ['clock-alarm://']);
           return { ok: true, opened: 'Clock — Alarms' };
         } catch (err) {
           return { ok: false, error: err instanceof Error ? err.message : String(err) };
