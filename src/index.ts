@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import os from 'node:os';
 import { runDoctor, runOneShot, runRepl, buildAgent } from './cli/index.js';
 import {
   addSchedule,
@@ -39,6 +40,7 @@ Usage:
   jarv-genie --remote [URL]       use the linked hub (or URL) for any mode
   jarv-genie hub [--host H] [--port N] [--no-open] [--no-auth|--auth]   start the brain
   jarv-genie hub --token          print the hub token
+  jarv-genie hub --url            print the hub's reachable URLs (local + network/Tailscale)
   jarv-genie link <url> <token>   pair this machine to a hub (token via hub --token)
   jarv-genie unlink               forget the hub
   jarv-genie sidecar [--name X] [--speak] [--no-notify] [--remote]   connect a device to the hub
@@ -110,8 +112,8 @@ function parseArgs(argv: string[]): Args {
   return out;
 }
 
-function parseHubArgs(argv: string[]): UiServerOptions & { token?: boolean; newToken?: boolean } {
-  const out: UiServerOptions & { token?: boolean; newToken?: boolean } = {};
+function parseHubArgs(argv: string[]): UiServerOptions & { token?: boolean; newToken?: boolean; printUrl?: boolean } {
+  const out: UiServerOptions & { token?: boolean; newToken?: boolean; printUrl?: boolean } = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--port') out.port = Number(argv[++i]);
@@ -122,8 +124,22 @@ function parseHubArgs(argv: string[]): UiServerOptions & { token?: boolean; newT
     else if (a === '--token') out.token = true;
     else if (a === '--new-token') out.newToken = true;
     else if (a === '--update-url') out.updateUrl = argv[++i];
+    else if (a === '--url') out.printUrl = true;
   }
   return out;
+}
+
+/** Reachable IPv4 addresses for the hub, best for sharing a URL with a phone. */
+function hubIps(): string[] {
+  const out: string[] = [];
+  const interfaces = os.networkInterfaces();
+  for (const list of Object.values(interfaces ?? {})) {
+    for (const itf of list ?? []) {
+      if (itf.family === 'IPv4' && !itf.internal) out.push(itf.address);
+    }
+  }
+  // Prefer a Tailscale address so the hub is reachable from a phone anywhere.
+  return [...out].sort((a) => (a.startsWith('100.') || a.startsWith('fd7:') ? -1 : 1));
 }
 
 function extractRemote(argv: string[]): string | undefined {
@@ -361,6 +377,14 @@ async function main(): Promise<void> {
       const store = getTokenStore();
       const token = opts.newToken ? store.rotate() : store.get();
       process.stdout.write(`${token}\n`);
+      return;
+    }
+    if (opts.printUrl) {
+      const port = opts.port ?? 3001;
+      const host = opts.host ?? '127.0.0.1';
+      process.stdout.write(`loopback:  http://${host}:${port}\n`);
+      for (const ip of hubIps()) process.stdout.write(`network:   http://${ip}:${port}\n`);
+      if (opts.auth) process.stdout.write(`token:     ${getTokenStore().get()}\n`);
       return;
     }
     const ctx = await buildAgent();
