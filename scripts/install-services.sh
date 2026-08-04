@@ -40,6 +40,10 @@ write_plist() {
     <true/>
     <key>ThrottleInterval</key>
     <integer>60</integer>
+    <key>StandardOutPath</key>
+    <string>/tmp/${label}.out</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/${label}.err</string>
 </dict>
 </plist>
 EOF
@@ -53,25 +57,26 @@ write_plist "com.fortress.jarvgenie-heartbeat" "<string>agent</string>" "$LAUNCH
 
 SERVICES=(com.fortress.jarvgenie-hub com.fortress.jarvgenie-heartbeat)
 
-# Telegram bridge (remote chat + explicit-consent approvals) — only when configured.
+# Telegram bridge (remote chat + explicit-consent approvals) — needs only the
+# bot token; the first person to message the bot becomes the owner.
 if python3 -c "
 import json,os
 try:
     s=json.load(open(os.path.expanduser('~/.jarv-genie/secrets.json')))
 except Exception:
     s={}
-sys_exit=0 if s.get('TELEGRAM_BOT_TOKEN') and s.get('TELEGRAM_CHAT_ID') else 1
-import sys; sys.exit(sys_exit)
+import sys; sys.exit(0 if s.get('TELEGRAM_BOT_TOKEN') else 1)
 " 2>/dev/null; then
   write_plist "com.fortress.jarvgenie-telegram" "<string>telegram</string>" "$LAUNCH_DIR/com.fortress.jarvgenie-telegram.plist"
   SERVICES+=(com.fortress.jarvgenie-telegram)
   echo "telegram bridge configured — will run"
 else
-  echo "telegram bridge not configured (set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID to enable)"
+  echo "telegram bridge not configured (set TELEGRAM_BOT_TOKEN to enable)"
 fi
 
 for svc in "${SERVICES[@]}"; do
   launchctl bootout "gui/$(id -u)/$svc" 2>/dev/null || true
+  sleep 1
   launchctl bootstrap "gui/$(id -u)" "$LAUNCH_DIR/$svc.plist"
   echo "loaded $svc"
 done
