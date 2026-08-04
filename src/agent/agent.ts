@@ -4,6 +4,7 @@ import { approvalActive, requireApproval } from '../approvals.js';
 import type { ModelRouter } from '../providers/index.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ChatMessage, MemoryService, ToolCall, ToolContext } from './types.js';
+import { composeRecentContextBlock } from './recentContext.js';
 
 /** Parse tool invocations written as text, e.g. `schedule_add --cron "0 7 * * 6" --prompt "x"`. */
 export function extractTextToolCalls(text: string, toolNames: string[]): Array<{ name: string; args: Record<string, unknown> }> {
@@ -65,8 +66,16 @@ export class Agent {
 
   private async loop(input: string, sessionId: string | undefined, onDelta: ((delta: string) => void) | null): Promise<AgentResult> {
     const config = this.opts.config;
-    const system: ChatMessage = { role: 'system', content: composeSystemPrompt(config.agent.systemPrompt, loadSoul(config.agent.soulPath)) };
     const history = sessionId ? await this.opts.memory.sessionLoad(sessionId) : [];
+    // Recent-context skill: keep the last ~2 hours of conversation pinned in
+    // the system prompt so a long thread can't push it out of the model's
+    // attention. Build the system message after loading history (it needs it).
+    const system: ChatMessage = {
+      role: 'system',
+      content:
+        composeSystemPrompt(config.agent.systemPrompt, loadSoul(config.agent.soulPath)) +
+        composeRecentContextBlock(history),
+    };
     const messages: ChatMessage[] = [system, ...history, { role: 'user', content: input }];
     const firstNewIndex = history.length + 1;
 

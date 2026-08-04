@@ -68,6 +68,24 @@ Be honest: only ever claim an action succeeded if its tool result says it did.`;
     const ctx: ToolContext = { memory: this.opts.memory, config: this.opts.config, workdir: this.opts.config.agent.workdir };
     const tools = this.opts.tools.list();
     const results: Array<Record<string, unknown>> = [];
+
+    // Batch consent: if a consent channel is active and any of this round's
+    // calls are consequential, ask ONCE for the whole batch instead of one
+    // approval per call.
+    let batchApproved: boolean | null = null;
+    const consequential = calls
+      .filter((c) => allowed.has(c.name))
+      .map((c) => tools.find((t) => t.name === c.name))
+      .filter((d) => d?.consequential);
+    if (consequential.length > 0 && approvalActive()) {
+      const desc = calls
+        .filter((c) => allowed.has(c.name))
+        .filter((c) => tools.find((t) => t.name === c.name)?.consequential)
+        .map((c) => `${c.name}${JSON.stringify(c.arguments ?? {})}`)
+        .join('; ');
+      batchApproved = await requireApproval(desc);
+    }
+
     for (const call of calls) {
       // Hard block: never run a tool that wasn't exposed for this task.
       if (!allowed.has(call.name)) {
@@ -85,9 +103,8 @@ Be honest: only ever claim an action succeeded if its tool result says it did.`;
         continue;
       }
       if (def.consequential && approvalActive()) {
-        const approved = await requireApproval(`${call.name}${JSON.stringify(call.arguments ?? {})}`);
-        if (!approved) {
-          results.push({ tool: call.name, denied: true, error: 'user denied this action — not performed' });
+        if (batchApproved === false) {
+          results.push({ tool: call.name, denied: true, error: 'user denied these actions — not performed' });
           continue;
         }
       }

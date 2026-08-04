@@ -125,3 +125,28 @@ test('empty model output is nudged to respond', async () => {
   const res = await runner.run('hello');
   assert.strictEqual(res.text, 'There now.');
 });
+
+test('a round of multiple consequential tools gets ONE batched approval', async () => {
+  let approvals = 0;
+  setApprovalHandler(async () => {
+    approvals++;
+    return true;
+  });
+  try {
+    const { runner, executed } = build([
+      {
+        calls: [
+          { id: '1', name: 'set_alarm', arguments: { cron: '0 8 * * 6', prompt: 'a' } },
+          { id: '2', name: 'set_alarm', arguments: { cron: '0 9 * * 6', prompt: 'b' } },
+        ],
+      },
+      { content: 'done.' },
+    ]);
+    const res = await runner.run('set two alarms');
+    assert.strictEqual(approvals, 1, 'one approval for the whole round, not two');
+    assert.strictEqual(executed.length, 2, 'both ran after the single approval');
+    assert.strictEqual(res.text, 'done.');
+  } finally {
+    setApprovalHandler(null);
+  }
+});
