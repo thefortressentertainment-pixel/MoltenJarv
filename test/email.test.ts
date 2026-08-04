@@ -113,6 +113,18 @@ test('sendMail throws a helpful error when SMTP is unconfigured', async () => {
   });
 });
 
+test('sendMail refuses malformed recipients even when SMTP is configured', async () => {
+  await withIsolatedSecrets(async () => {
+    const get = (name: string) => {
+      if (name === 'SMTP_HOST') return '127.0.0.1';
+      if (name === 'SMTP_USER') return 'jarv@example.test';
+      if (name === 'SMTP_PASS') return 'x';
+      return undefined;
+    };
+    await assert.rejects(sendMail({ to: 'a@b.c', subject: 's', text: 't' }, get), /invalid recipient email/);
+  });
+});
+
 test('readMail throws a helpful error when IMAP is unconfigured', async () => {
   await withIsolatedSecrets(async () => {
     await assert.rejects(readMail({}, () => undefined), /IMAP not configured/);

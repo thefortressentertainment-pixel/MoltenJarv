@@ -61,6 +61,9 @@ export async function sendMail(
   if (!transport) {
     throw new Error('SMTP not configured: set SMTP_HOST, SMTP_USER, SMTP_PASS (and SMTP_PORT) via: jarv-genie key set <NAME> <value>');
   }
+  if (!/^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/.test(opts.to)) {
+    throw new Error(`invalid recipient email: "${opts.to}" — refused before sending`);
+  }
   const from = opts.from ?? secretOrEnv(get, 'EMAIL_FROM') ?? (secretOrEnv(get, 'SMTP_USER') ?? '');
   const info = await transport.sendMail({
     from,
