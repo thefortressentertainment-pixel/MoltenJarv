@@ -5,14 +5,17 @@ import type { ToolContext } from '../src/agent/types.js';
 
 const ctx = { config: {}, memory: {}, workdir: '/' } as unknown as ToolContext;
 
-test('app_command is consequential; app_status is read-only', () => {
+test('app_command is consequential; app_status and process_list are read-only', () => {
   const names = appsTools().map((t) => t.name);
   assert.ok(names.includes('app_command'));
   assert.ok(names.includes('app_status'));
+  assert.ok(names.includes('process_list'));
   const cmd = appsTools().find((t) => t.name === 'app_command')!;
   const status = appsTools().find((t) => t.name === 'app_status')!;
+  const plist = appsTools().find((t) => t.name === 'process_list')!;
   assert.strictEqual(cmd.consequential, true);
   assert.ok(!status.consequential, 'status reads must not require consent');
+  assert.ok(!plist.consequential, 'process list must not require consent');
 });
 
 test('app_command refuses unknown apps and unknown actions', async () => {

@@ -76,6 +76,29 @@ test('mutating system tools are marked consequential for the consent gate', () =
   assert.ok(consequential.has('run_shell'));
   assert.ok(consequential.has('file_write_any'));
   assert.ok(consequential.has('file_delete_any'));
+  assert.ok(consequential.has('file_move_any'));
+  assert.ok(consequential.has('file_copy_any'));
+  assert.ok(consequential.has('open_file'));
+  assert.ok(consequential.has('reveal_in_finder'));
   assert.ok(!consequential.has('file_read_any'), 'reads stay un-gated');
   assert.ok(!consequential.has('file_list_any'));
+  assert.ok(!consequential.has('clipboard_get'), 'clipboard read stays un-gated');
+});
+
+test('file_move_any and file_copy_any work', async () => {
+  const { dir } = tmp();
+  try {
+    const src = path.join(dir, 'src.txt');
+    writeFileSync(src, 'hello');
+    const move = systemTools().find((t) => t.name === 'file_move_any')!;
+    const copy = systemTools().find((t) => t.name === 'file_copy_any')!;
+    const moved = path.join(dir, 'moved.txt');
+    await move.handler({ from: src, to: moved }, {} as ToolContext);
+    assert.strictEqual(readFileSync(moved, 'utf8'), 'hello');
+    const copied = path.join(dir, 'copied.txt');
+    await copy.handler({ from: moved, to: copied }, {} as ToolContext);
+    assert.strictEqual(readFileSync(copied, 'utf8'), 'hello');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

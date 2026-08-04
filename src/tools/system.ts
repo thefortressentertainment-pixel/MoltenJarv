@@ -129,5 +129,88 @@ export function systemTools(): ToolDefinition[] {
         return { ok: true, deleted: p };
       },
     },
+    {
+      name: 'file_move_any',
+      description: 'Move or rename a file/directory at any path. REQUIRES explicit user consent when a remote channel is active.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          from: { type: 'string', description: 'Source path.' },
+          to: { type: 'string', description: 'Destination path (rename or move).' },
+        },
+        required: ['from', 'to'],
+      },
+      consequential: true,
+      handler: async (args) => {
+        const from = path.resolve(String(args.from ?? '').trim());
+        const to = path.resolve(String(args.to ?? '').trim());
+        if (!from || !to) return { ok: false, error: 'file_move_any requires from and to' };
+        await fs.mkdir(path.dirname(to), { recursive: true });
+        await fs.rename(from, to);
+        return { ok: true, from, to };
+      },
+    },
+    {
+      name: 'file_copy_any',
+      description: 'Copy a file/directory to a new path. REQUIRES explicit user consent when a remote channel is active.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          from: { type: 'string', description: 'Source path.' },
+          to: { type: 'string', description: 'Destination path.' },
+        },
+        required: ['from', 'to'],
+      },
+      consequential: true,
+      handler: async (args) => {
+        const from = path.resolve(String(args.from ?? '').trim());
+        const to = path.resolve(String(args.to ?? '').trim());
+        if (!from || !to) return { ok: false, error: 'file_copy_any requires from and to' };
+        await fs.mkdir(path.dirname(to), { recursive: true });
+        await fs.cp(from, to, { recursive: true });
+        return { ok: true, from, to };
+      },
+    },
+    {
+      name: 'open_file',
+      description: 'Open a file/folder in its default app (or Finder). REQUIRES explicit user consent when a remote channel is active.',
+      inputSchema: {
+        type: 'object',
+        properties: { path: { type: 'string', description: 'Absolute path to open.' } },
+        required: ['path'],
+      },
+      consequential: true,
+      handler: async (args) => {
+        const p = path.resolve(String(args.path ?? '').trim());
+        if (!p) return { ok: false, error: 'open_file requires a path' };
+        await execFileAsync('open', [p]);
+        return { ok: true, opened: p };
+      },
+    },
+    {
+      name: 'reveal_in_finder',
+      description: 'Reveal a file/folder in Finder (selects it in a window). REQUIRES explicit user consent when a remote channel is active.',
+      inputSchema: {
+        type: 'object',
+        properties: { path: { type: 'string', description: 'Absolute path to reveal.' } },
+        required: ['path'],
+      },
+      consequential: true,
+      handler: async (args) => {
+        const p = path.resolve(String(args.path ?? '').trim());
+        if (!p) return { ok: false, error: 'reveal_in_finder requires a path' };
+        await execFileAsync('open', ['-R', p]);
+        return { ok: true, revealed: p };
+      },
+    },
+    {
+      name: 'clipboard_get',
+      description: 'Read the current clipboard text. Read-only.',
+      inputSchema: { type: 'object', properties: {} },
+      handler: async () => {
+        const res = await execFileAsync('pbpaste');
+        return { ok: true, text: res.stdout };
+      },
+    },
   ];
 }
