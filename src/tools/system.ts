@@ -3,6 +3,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ToolDefinition } from '../agent/types.js';
+import { recordShutdownRequest } from '../cli/shutdown.js';
 
 /**
  * System tools: shell command execution and full-filesystem access, for when
@@ -39,6 +40,9 @@ export function systemTools(): ToolDefinition[] {
       handler: async (args) => {
         const command = String(args.command ?? '').trim();
         if (!command) return { ok: false, error: 'run_shell requires a command' };
+        if (/\b(shutdown|reboot|halt)\b/.test(command)) {
+          recordShutdownRequest('run_shell');
+        }
         const workdir = args.workdir ? path.resolve(String(args.workdir)) : undefined;
         const timeout = Math.min(Math.max(Math.trunc(Number(args.timeout ?? 60) || 60), 1), 300) * 1000;
         try {

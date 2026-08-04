@@ -5,7 +5,6 @@ import { ensureResources, tryAcquireBusy, releaseBusy } from '../resource.js';
 import { TelegramClient, type TgUpdate } from '../telegram/client.js';
 import { TaskRunner } from '../agent/taskrunner.js';
 import type { AgentContext } from './index.js';
-
 /**
  * Telegram bridge: run `jarv-genie telegram`. Polls the bot for messages from
  * the authorized user, runs them through the agent, and replies. Consequential
@@ -65,6 +64,9 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
 
   let chatId = secrets.get('TELEGRAM_CHAT_ID');
   keepAwake();
+  // Clear any busy-lock left over from a previous process (e.g. a reboot), so
+  // the heartbeat isn't blocked by a stale lock.
+  releaseBusy();
 
   const runner = new TaskRunner({
     router: ctx.router,

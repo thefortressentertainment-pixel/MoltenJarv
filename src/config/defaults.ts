@@ -7,7 +7,9 @@ export const SERVER_NAME = 'jarv-genie';
 export const MCP_VERSION = '0.1.0';
 
 export function dataHome(): string {
-  return path.join(os.homedir(), '.jarv-genie');
+  // Prefer $HOME so tests can isolate deterministically (os.homedir() is cached
+  // by Node at process start and can ignore a later env override).
+  return path.join(process.env.HOME ?? os.homedir(), '.jarv-genie');
 }
 
 export function configPath(): string {
