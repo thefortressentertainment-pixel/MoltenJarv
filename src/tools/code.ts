@@ -9,7 +9,30 @@ import type { ToolDefinition } from '../agent/types.js';
  * "function like VSCodium" capability.
  */
 
-const IGNORED = new Set(['node_modules', '.git', 'dist', '.next', 'coverage', '.cache']);
+const IGNORED = new Set([
+  'node_modules',
+  '.git',
+  'dist',
+  '.next',
+  'coverage',
+  '.cache',
+  'target',
+  'build',
+  'out',
+  'bin',
+  'obj',
+  'vendor',
+  'Pods',
+  'DerivedData',
+  '.terraform',
+  'tmp',
+]);
+
+/** Treat a file as binary if it contains a null byte in its head — skip those. */
+function isBinary(buf: Buffer): boolean {
+  const head = buf.subarray(0, 8000);
+  return head.includes(0);
+}
 
 function walk(dir: string, depth: number, out: string[]): void {
   if (depth > 12) return;
@@ -34,7 +57,7 @@ export function codeTools(): ToolDefinition[] {
     {
       name: 'code_search',
       description:
-        'Search a codebase for a text or regex pattern, returning file:line matches (skips node_modules, .git, dist). Use to find where things are defined or referenced before editing.',
+        'Search a codebase for a text or regex pattern, returning file:line matches. Skips node_modules, .git, dist, build/target dirs, and binary files. Use to find where things are defined or referenced before editing.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -60,14 +83,16 @@ export function codeTools(): ToolDefinition[] {
         const matches: Array<{ file: string; line: number; text: string }> = [];
         for (const f of files) {
           if (matches.length >= maxResults) break;
-          let text: string;
+          let buf: Buffer;
           try {
             const stat = fs.statSync(f);
             if (stat.size > 2 * 1024 * 1024) continue;
-            text = fs.readFileSync(f, 'utf8');
+            buf = fs.readFileSync(f);
+            if (isBinary(buf)) continue;
           } catch {
             continue;
           }
+          const text = buf.toString('utf8');
           const lines = text.split('\n');
           for (let i = 0; i < lines.length; i++) {
             const line = lines[i] ?? '';

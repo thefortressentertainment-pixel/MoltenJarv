@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -70,6 +70,24 @@ test('code_search finds matches and skips nothing important', async () => {
     assert.strictEqual(res.matches.length, 1);
     assert.match(res.matches[0]!.file, /one\.ts$/);
     assert.strictEqual(res.matches[0]!.line, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('code_search skips build dirs and binary files', async () => {
+  const dir = tmpDir();
+  try {
+    mkdirSync(path.join(dir, 'target'), { recursive: true });
+    mkdirSync(path.join(dir, 'src'), { recursive: true });
+    writeFileSync(path.join(dir, 'target', 'artifact.bin'), '\x00\x01\x02\x03' + 'junk'.repeat(200));
+    writeFileSync(path.join(dir, 'target', 'build.rs'), 'const x = 1;\n');
+    writeFileSync(path.join(dir, 'src', 'real.ts'), 'const x = 1;\n');
+    const tool = codeTools().find((t) => t.name === 'code_search')!;
+    const res = (await tool.handler({ pattern: 'const x', dir }, ctx)) as { ok: boolean; matches: Array<{ file: string }> };
+    assert.strictEqual(res.ok, true);
+    assert.strictEqual(res.matches.length, 1, 'only the real source file should match');
+    assert.match(res.matches[0]!.file, /src[\\/]real\.ts$/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
