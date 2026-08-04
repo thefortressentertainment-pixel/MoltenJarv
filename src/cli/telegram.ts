@@ -88,6 +88,7 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
     tools: ctx.tools,
     memory: ctx.memory,
     config: ctx.config,
+    sessionId: 'chat',
   });
   const client = new TelegramClient(token);
   const me = await client.getMe();

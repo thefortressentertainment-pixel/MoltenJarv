@@ -1,8 +1,27 @@
 import assert from 'node:assert';
 import net from 'node:net';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
 import { sendMail, readMail } from '../src/email/client.js';
 import { emailTools } from '../src/tools/email.js';
+import { resetSecretStore } from '../src/config/secrets.js';
+
+/** Isolate from the real secret store so these tests never touch live email creds. */
+async function withIsolatedSecrets(fn: () => Promise<void>): Promise<void> {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'jarv-mail-'));
+  const oldHome = process.env.HOME;
+  process.env.HOME = dir;
+  resetSecretStore();
+  try {
+    await fn();
+  } finally {
+    process.env.HOME = oldHome ?? '';
+    resetSecretStore();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 interface SmtpCapture {
   mailFrom: string;
@@ -65,33 +84,39 @@ function startSmtpServer(): Promise<{ port: number; close: () => Promise<void>; 
 }
 
 test('sendMail delivers over SMTP and respects subject/to/body', async () => {
-  const srv = await startSmtpServer();
-  try {
-    const get = (name: string) => {
-      if (name === 'SMTP_HOST') return '127.0.0.1';
-      if (name === 'SMTP_PORT') return String(srv.port);
-      if (name === 'SMTP_USER') return 'jarv@example.test';
-      if (name === 'SMTP_PASS') return 'secret';
-      return undefined;
-    };
-    const res = await sendMail({ to: 'you@example.test', subject: 'Subject Line', text: 'Hello body' }, get);
-    assert.ok(res.messageId);
-    const c = srv.capture();
-    assert.strictEqual(c.mailFrom, 'jarv@example.test');
-    assert.strictEqual(c.rcptTo, 'you@example.test');
-    assert.match(c.data, /Subject: Subject Line/);
-    assert.match(c.data, /Hello body/);
-  } finally {
-    await srv.close();
-  }
+  await withIsolatedSecrets(async () => {
+    const srv = await startSmtpServer();
+    try {
+      const get = (name: string) => {
+        if (name === 'SMTP_HOST') return '127.0.0.1';
+        if (name === 'SMTP_PORT') return String(srv.port);
+        if (name === 'SMTP_USER') return 'jarv@example.test';
+        if (name === 'SMTP_PASS') return 'secret';
+        return undefined;
+      };
+      const res = await sendMail({ to: 'you@example.test', subject: 'Subject Line', text: 'Hello body' }, get);
+      assert.ok(res.messageId);
+      const c = srv.capture();
+      assert.strictEqual(c.mailFrom, 'jarv@example.test');
+      assert.strictEqual(c.rcptTo, 'you@example.test');
+      assert.match(c.data, /Subject: Subject Line/);
+      assert.match(c.data, /Hello body/);
+    } finally {
+      await srv.close();
+    }
+  });
 });
 
 test('sendMail throws a helpful error when SMTP is unconfigured', async () => {
-  await assert.rejects(sendMail({ to: 'a@b.c', subject: 's', text: 't' }, () => undefined), /SMTP not configured/);
+  await withIsolatedSecrets(async () => {
+    await assert.rejects(sendMail({ to: 'a@b.c', subject: 's', text: 't' }, () => undefined), /SMTP not configured/);
+  });
 });
 
 test('readMail throws a helpful error when IMAP is unconfigured', async () => {
-  await assert.rejects(readMail({}, () => undefined), /IMAP not configured/);
+  await withIsolatedSecrets(async () => {
+    await assert.rejects(readMail({}, () => undefined), /IMAP not configured/);
+  });
 });
 
 test('emailTools expose send and read', () => {

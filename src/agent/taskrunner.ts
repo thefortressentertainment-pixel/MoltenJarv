@@ -4,6 +4,7 @@ import type { JarvGenieConfig } from '../config/index.js';
 import type { ChatMessage, MemoryService, ToolCall, ToolContext, ToolDefinition } from './types.js';
 import { approvalActive, requireApproval } from '../approvals.js';
 import { extractTextToolCalls } from './agent.js';
+import { composeRecentContextBlock } from './recentContext.js';
 
 /**
  * Iterative plan→execute loop task runner. Unlike the conversational Agent,
@@ -23,6 +24,8 @@ export interface TaskRunnerOptions {
   tools: ToolRegistry;
   memory: MemoryService;
   config: JarvGenieConfig;
+  /** When set, recent conversation is injected for continuity and the exchange is persisted. */
+  sessionId?: string;
 }
 
 export interface TaskResult {
@@ -53,6 +56,7 @@ export class TaskRunner {
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     return `You are Jarv Genie, a helpful assistant running on the user's Mac. Today is ${today}.
 Answer the user directly and concisely, or use the provided tools to complete their request when useful.
+Interpret typos and unclear wording contextually: if a word looks like a misspelling of a known term — an app, tool, file, or topic from this conversation — assume the intended meaning and proceed. Do not get stuck on the literal text; only ask for clarification if it is genuinely ambiguous.
 You have shell, UI-control, file, image-drawing, scheduling, web, and code tools. You can open or install apps, run commands, draw shapes, type, click, and edit code.
 NEVER open, activate, or draw into apps (open_app, ui_activate, open_alarms, draw_shape, camera_capture) unless the user explicitly asks you to open, view, or create an image on screen. Checks, searches, test runs, and reports never require opening apps — use screen_capture if you need to see the screen (it opens nothing).
 When using code_search, search for SPECIFIC identifiers (function or class names like composeSystemPrompt) rather than vague words — vague terms match documentation and miss the source.
@@ -124,8 +128,14 @@ Be honest: only ever claim an action succeeded if its tool result says it did.`;
   }
 
   async run(input: string): Promise<TaskResult> {
+    let history: ChatMessage[] = [];
+    if (this.opts.sessionId) {
+      history = await this.opts.memory.sessionLoad(this.opts.sessionId);
+    }
+    const recent = composeRecentContextBlock(history);
+    const systemContent = recent ? this.systemPrompt() + recent : this.systemPrompt();
     const messages: ChatMessage[] = [
-      { role: 'system', content: this.systemPrompt() },
+      { role: 'system', content: systemContent },
       { role: 'user', content: input },
     ];
     const maxSteps = Math.max(1, this.opts.config.agent?.maxSteps ?? 8);
@@ -175,6 +185,12 @@ Be honest: only ever claim an action succeeded if its tool result says it did.`;
       });
     }
 
+    if (this.opts.sessionId && text) {
+      await this.opts.memory.sessionAppend(this.opts.sessionId, [
+        { role: 'user', content: input },
+        { role: 'assistant', content: text },
+      ]);
+    }
     return { text: text || "I hit my step limit while working through this — several steps likely waited on approvals or the task was long. Some actions may already be done. Tell me to continue or repeat the last part and I'll pick it up.", steps, toolCalls, provider, model };
   }
 
@@ -237,6 +253,12 @@ Be honest: only ever claim an action succeeded if its tool result says it did.`;
       });
     }
 
+    if (this.opts.sessionId && text) {
+      await this.opts.memory.sessionAppend(this.opts.sessionId, [
+        { role: 'user', content: input },
+        { role: 'assistant', content: text },
+      ]);
+    }
     return { text: text || "I hit my step limit while working through this — several steps likely waited on approvals or the task was long. Some actions may already be done. Tell me to continue or repeat the last part and I'll pick it up.", steps, toolCalls, provider, model };
   }
 }

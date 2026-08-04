@@ -42,6 +42,7 @@ function fakeCtx(): AgentContext {
     },
     memory: {
       sessionLoad: async () => [],
+      sessionAppend: async () => {},
       sessionReset: async (id: string) => {
         calls.push(`reset:${id}`);
       },

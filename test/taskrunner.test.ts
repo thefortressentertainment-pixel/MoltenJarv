@@ -150,3 +150,34 @@ test('a round of multiple consequential tools gets ONE batched approval', async 
     setApprovalHandler(null);
   }
 });
+
+test('with a sessionId, the exchange is persisted and recent history is loaded', async () => {
+  let loaded = 0;
+  let appended: ChatMessage[][] = [];
+  const memory = {
+    sessionLoad: async () => {
+      loaded++;
+      return [];
+    },
+    sessionAppend: async (_id: string, msgs: ChatMessage[]) => appended.push(msgs),
+    sessionReset: async () => {},
+  };
+  const { router } = fakeRouter([{ content: 'Hello!' }]);
+  const { tools } = fakeTools();
+  const runner = new TaskRunner({
+    router: router as never,
+    tools: tools as never,
+    memory: memory as never,
+    config: { agent: { systemPrompt: 'sys', maxSteps: 3, workdir: '/tmp' } } as never,
+    sessionId: 'chat',
+  });
+  const res = await runner.run('hi');
+  assert.strictEqual(res.text, 'Hello!');
+  assert.strictEqual(loaded, 1, 'history loaded for recent context');
+  assert.strictEqual(appended.length, 1, 'exchange persisted');
+  const saved = appended[0]!;
+  assert.strictEqual(saved[0]?.role, 'user');
+  assert.strictEqual(saved[0]?.content, 'hi');
+  assert.strictEqual(saved[1]?.role, 'assistant');
+  assert.strictEqual(saved[1]?.content, 'Hello!');
+});

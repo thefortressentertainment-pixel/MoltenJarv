@@ -207,7 +207,7 @@ function handler(ctx: AgentContext, opts: UiServerOptions, host: string) {
         const body = await readJson(req);
         const message = String(body.message ?? '');
         if (!message.trim()) return json(res, 400, { error: 'message is required' });
-        const runner = new TaskRunner({ router: ctx.router, tools: ctx.tools, memory: ctx.memory, config: ctx.config });
+        const runner = new TaskRunner({ router: ctx.router, tools: ctx.tools, memory: ctx.memory, config: ctx.config, sessionId: 'chat' });
         if (body.stream === true) return await streamChat(res, req, runner, message);
         try {
           const result = await runner.run(message);

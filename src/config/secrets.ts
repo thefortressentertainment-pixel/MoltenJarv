@@ -64,3 +64,8 @@ export function getSecretStore(): SecretStore {
   if (!singleton) singleton = new SecretStore(path.join(dataHome(), SECRETS_FILE));
   return singleton;
 }
+
+/** Tests only: drop the cached singleton so a changed HOME is re-read. */
+export function resetSecretStore(): void {
+  singleton = null;
+}

@@ -44,6 +44,7 @@ function fakeCtx(): AgentContext {
     },
     memory: {
       sessionLoad: async () => [],
+      sessionAppend: async () => {},
       sessionReset: async (id: string) => void id,
       listFacts: async () => [{ id: '1', text: 'fact one', createdAt: '' }],
     },
