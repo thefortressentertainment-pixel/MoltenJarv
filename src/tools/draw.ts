@@ -99,7 +99,9 @@ export function drawTools(): ToolDefinition[] {
           await execFileAsync('magick', argsList);
           if (!fs.existsSync(out)) return { ok: false, error: 'image was not created' };
           const app = String(args.app ?? '').trim() || 'Preview';
-          await execFileAsync('open', ['-a', app, out]);
+          if (process.env.JARV_GENIE_NO_OPEN !== '1') {
+            await execFileAsync('open', ['-a', app, out]);
+          }
           pruneOldDrawings();
           return { ok: true, shape, size: n, savedTo: out, openedIn: app };
         } catch (err) {

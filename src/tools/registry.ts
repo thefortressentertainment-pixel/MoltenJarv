@@ -1,4 +1,5 @@
 import type { ToolContext, ToolDefinition } from '../agent/types.js';
+import fs from 'node:fs';
 
 export interface ExecutionResult {
   ok: boolean;
@@ -26,6 +27,13 @@ export class ToolRegistry {
   }
 
   async execute(name: string, args: Record<string, unknown>, ctx: ToolContext): Promise<ExecutionResult> {
+    if (process.env.JARV_GENIE_DEBUG_TOOLS) {
+      try {
+        fs.appendFileSync('/tmp/jarv-toollog.txt', `${new Date().toISOString()} ${name} ${JSON.stringify(args)}\n`);
+      } catch {
+        /* best effort */
+      }
+    }
     const tool = this.map.get(name);
     if (!tool) return { ok: false, result: `Unknown tool: ${name}` };
     try {

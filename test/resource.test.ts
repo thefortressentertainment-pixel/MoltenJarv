@@ -1,24 +1,21 @@
 import assert from 'node:assert';
-import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tryAcquireBusy, releaseBusy, isBusy, freeMemoryPercent } from '../src/resource.js';
 
 test('busy lock serializes: second acquirer is refused until release', () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'jarv-res-'));
-  const oldHome = process.env.HOME;
-  process.env.HOME = dir;
+  const lock = path.join(dir, 'busy.lock');
   try {
-    assert.strictEqual(isBusy(), false);
-    assert.strictEqual(tryAcquireBusy(), true, 'first acquirer gets the lock');
-    assert.strictEqual(isBusy(), true, 'lock is visible after acquisition');
-    assert.strictEqual(tryAcquireBusy(), false, 'second acquirer is refused while held');
-    releaseBusy();
-    assert.strictEqual(isBusy(), false, 'lock is free after release');
+    assert.strictEqual(isBusy(lock), false);
+    assert.strictEqual(tryAcquireBusy(lock), true, 'first acquirer gets the lock');
+    assert.strictEqual(isBusy(lock), true, 'lock is visible after acquisition');
+    assert.strictEqual(tryAcquireBusy(lock), false, 'second acquirer is refused while held');
+    releaseBusy(lock);
+    assert.strictEqual(isBusy(lock), false, 'lock is free after release');
   } finally {
-    process.env.HOME = oldHome ?? '';
     rmSync(dir, { recursive: true, force: true });
   }
 });

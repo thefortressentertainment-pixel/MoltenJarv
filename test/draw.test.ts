@@ -9,9 +9,13 @@ import type { ToolContext } from '../src/agent/types.js';
 function withHome(fn: () => Promise<void>): Promise<void> {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'jarv-draw-'));
   const oldHome = process.env.HOME;
+  const oldNoOpen = process.env.JARV_GENIE_NO_OPEN;
   process.env.HOME = dir;
+  process.env.JARV_GENIE_NO_OPEN = '1';
   return fn().finally(() => {
     process.env.HOME = oldHome ?? '';
+    if (oldNoOpen === undefined) delete process.env.JARV_GENIE_NO_OPEN;
+    else process.env.JARV_GENIE_NO_OPEN = oldNoOpen;
     rmSync(dir, { recursive: true, force: true });
   });
 }

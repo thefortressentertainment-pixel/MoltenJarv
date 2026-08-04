@@ -19,8 +19,12 @@ import { loadConfig } from './config/index.js';
 const execFileAsync = promisify(execFile);
 const LOW_WATER = 15; // % free before we start cleaning
 const BLOCK_WATER = 8; // % free below which we refuse new work
-const BUSY_LOCK = path.join(dataHome(), 'busy.lock');
 const BUSY_TTL_MS = 30 * 60 * 1000;
+
+/** Default busy-lock path; callers may pass an explicit path (tests). */
+export function busyLockPath(): string {
+  return path.join(dataHome(), 'busy.lock');
+}
 
 /** Current free memory percentage, from `memory_pressure`. */
 export async function freeMemoryPercent(): Promise<number> {
@@ -131,33 +135,33 @@ export async function ensureResources(): Promise<'ok' | 'cleaned' | 'blocked'> {
 }
 
 /** Try to claim the busy lock (single-task execution across processes). */
-export function tryAcquireBusy(): boolean {
+export function tryAcquireBusy(lockPath = busyLockPath()): boolean {
   try {
-    const st = fs.statSync(BUSY_LOCK);
+    const st = fs.statSync(lockPath);
     if (Date.now() - st.mtimeMs < BUSY_TTL_MS) return false;
   } catch {
     // no lock yet
   }
   try {
-    fs.mkdirSync(path.dirname(BUSY_LOCK), { recursive: true });
-    fs.writeFileSync(BUSY_LOCK, String(Date.now()));
+    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+    fs.writeFileSync(lockPath, String(Date.now()));
     return true;
   } catch {
     return true;
   }
 }
 
-export function releaseBusy(): void {
+export function releaseBusy(lockPath = busyLockPath()): void {
   try {
-    fs.rmSync(BUSY_LOCK, { force: true });
+    fs.rmSync(lockPath, { force: true });
   } catch {
     /* ignore */
   }
 }
 
-export function isBusy(): boolean {
+export function isBusy(lockPath = busyLockPath()): boolean {
   try {
-    const st = fs.statSync(BUSY_LOCK);
+    const st = fs.statSync(lockPath);
     return Date.now() - st.mtimeMs < BUSY_TTL_MS;
   } catch {
     return false;

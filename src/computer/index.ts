@@ -158,6 +158,8 @@ async function hasCommand(cmd: string): Promise<boolean> {
 }
 
 export async function openApp(app: string): Promise<void> {
+  // Tests set JARV_GENIE_NO_OPEN=1 so the suite never opens real apps.
+  if (process.env.JARV_GENIE_NO_OPEN === '1') return;
   await execFileAsync('open', ['-a', app]);
 }
 

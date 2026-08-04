@@ -110,6 +110,10 @@ test('computerTools gate control actions behind allowControl', async () => {
   assert.strictEqual(result.output.trim(), '2');
 
   const app = tools.find((t) => t.name === 'open_app')!;
+  const oldNoOpen = process.env.JARV_GENIE_NO_OPEN;
+  process.env.JARV_GENIE_NO_OPEN = '1';
   const opened = await app.handler({ app: 'Calculator' }, makeContext('/tmp'));
+  if (oldNoOpen === undefined) delete process.env.JARV_GENIE_NO_OPEN;
+  else process.env.JARV_GENIE_NO_OPEN = oldNoOpen;
   assert.strictEqual(opened.ok, true);
 });
