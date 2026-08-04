@@ -24,6 +24,15 @@ test('cron parser handles *, steps, ranges, and lists', () => {
   assert.throws(() => parseCron('61 * * * *'), /out of range/);
 });
 
+test('cron parser accepts weekday and month names', () => {
+  assert.deepStrictEqual(parseCron('0 8 * * Sat').dayOfWeek, [6]);
+  assert.deepStrictEqual(parseCron('0 8 * * sa').dayOfWeek, [6]);
+  assert.deepStrictEqual(parseCron('0 8 * * Saturday').dayOfWeek, [6]);
+  assert.deepStrictEqual(parseCron('0 9 * * MON-FRI').dayOfWeek, [1, 2, 3, 4, 5]);
+  assert.deepStrictEqual(parseCron('0 7 * JAN *').month, [1]);
+  assert.throws(() => parseCron('0 8 * * Saxy'), /invalid cron/);
+});
+
 test('cronMatches checks all fields', () => {
   const expr = parseCron('30 9 * * *');
   assert.ok(cronMatches(expr, new Date(2026, 7, 1, 9, 30)));

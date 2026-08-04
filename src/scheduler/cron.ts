@@ -17,6 +17,37 @@ const ALIASES: Record<string, string> = {
   '@midnight': '0 0 * * *',
 };
 
+const DOW_NAMES: Record<string, number> = {
+  sun: 0, sunday: 0, su: 0,
+  mon: 1, monday: 1, mo: 1,
+  tue: 2, tues: 2, tuesday: 2, tu: 2,
+  wed: 3, weds: 3, wednesday: 3, we: 3,
+  thu: 4, thur: 4, thurs: 4, thursday: 4, th: 4,
+  fri: 5, friday: 5, fr: 5,
+  sat: 6, saturday: 6, sa: 6,
+};
+
+const MONTH_NAMES: Record<string, number> = {
+  jan: 1, january: 1,
+  feb: 2, february: 2,
+  mar: 3, march: 3,
+  apr: 4, april: 4,
+  may: 5,
+  jun: 6, june: 6,
+  jul: 7, july: 7,
+  aug: 8, august: 8,
+  sep: 9, sept: 9, september: 9,
+  oct: 10, october: 10,
+  nov: 11, november: 11,
+  dec: 12, december: 12,
+};
+
+function resolveName(token: string, names: Record<string, number> | undefined): string {
+  if (!names) return token;
+  const n = names[token.toLowerCase()];
+  return n === undefined ? token : String(n);
+}
+
 export function parseCron(expr: string): CronExpression {
   const raw = (ALIASES[expr] ?? expr).trim();
   const parts = raw.split(/\s+/);
@@ -28,8 +59,8 @@ export function parseCron(expr: string): CronExpression {
     minute: parseField(min, 0, 59),
     hour: parseField(hour, 0, 23),
     dayOfMonth: parseField(dom, 1, 31),
-    month: parseField(mon, 1, 12),
-    dayOfWeek: parseField(dow, 0, 7),
+    month: parseField(mon, 1, 12, MONTH_NAMES),
+    dayOfWeek: parseField(dow, 0, 7, DOW_NAMES),
   };
 }
 
@@ -54,20 +85,21 @@ export function previousFire(expr: CronExpression, before: Date): Date {
   return before;
 }
 
-function parseField(field: string, min: number, max: number): number[] {
+function parseField(field: string, min: number, max: number, names?: Record<string, number>): number[] {
   if (field === '*') return range(min, max);
   const values = new Set<number>();
-  for (const part of field.split(',')) {
+  for (const partRaw of field.split(',')) {
+    const part = resolveName(partRaw, names);
     if (!part) throw new Error(`invalid cron field: ${field}`);
     const stepMatch = /^(.+)\/(\d+)$/.exec(part);
     if (stepMatch) {
-      const basePart = stepMatch[1]!;
+      const basePart = resolveName(stepMatch[1]!, names);
       const step = Number(stepMatch[2]!);
-      const base: [number, number] = basePart === '*' ? [min, max] : parseRange(basePart, min, max);
+      const base: [number, number] = basePart === '*' ? [min, max] : parseRange(basePart, min, max, names);
       for (let v = base[0]; v <= base[1]; v += step) values.add(v);
       continue;
     }
-    const [a, b] = parseRange(part, min, max);
+    const [a, b] = parseRange(part, min, max, names);
     for (let v = a; v <= b; v++) values.add(v);
   }
   const out = [...values].filter((v) => v >= min && v <= max).sort((x, y) => x - y);
@@ -75,15 +107,15 @@ function parseField(field: string, min: number, max: number): number[] {
   return out;
 }
 
-function parseRange(part: string, min: number, max: number): [number, number] {
+function parseRange(part: string, min: number, max: number, names?: Record<string, number>): [number, number] {
   const dash = part.split('-');
   if (dash.length === 1) {
-    const v = Number(dash[0]!);
+    const v = Number(resolveName(dash[0]!, names));
     if (!Number.isInteger(v)) throw new Error(`invalid cron value: ${part}`);
     return [v, v];
   }
-  const a = Number(dash[0]!);
-  const b = Number(dash[1]!);
+  const a = Number(resolveName(dash[0]!, names));
+  const b = Number(resolveName(dash[1]!, names));
   if (!Number.isInteger(a) || !Number.isInteger(b)) throw new Error(`invalid cron range: ${part}`);
   if (a > b) throw new Error(`cron range reversed: ${part}`);
   return [a, b];
