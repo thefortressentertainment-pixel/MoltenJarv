@@ -40,6 +40,8 @@ export interface JarvGenieConfig {
     allowControl?: boolean;
     visionModel?: string;
     visionEndpoint?: string;
+    cameraModel?: string;
+    cameraEndpoint?: string;
   };
 }
 

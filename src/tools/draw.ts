@@ -3,6 +3,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ToolDefinition } from '../agent/types.js';
+import { dataHome } from '../config/defaults.js';
 
 /**
  * Drawing tool: generate an image of a shape (square, rectangle, circle,
@@ -16,6 +17,27 @@ const execFileAsync = promisify(execFile);
 const SHAPES = ['square', 'rectangle', 'circle', 'triangle', 'text'];
 const FALLBACK_COLOR = '#ff0000';
 
+/** Keep at most 5 drawings in the workspace so they don't accumulate. */
+function pruneOldDrawings(keep = 5): void {
+  try {
+    const dir = path.join(dataHome(), 'workspace');
+    const files = fs
+      .readdirSync(dir)
+      .filter((f) => /^drawing-.*\.png$/.test(f))
+      .map((f) => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs }))
+      .sort((a, b) => b.t - a.t);
+    for (const file of files.slice(keep)) {
+      try {
+        fs.rmSync(path.join(dir, file.f), { force: true });
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 function validColor(c: string): boolean {
   return /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(c) || /^[a-z]+$/i.test(c);
 }
@@ -23,8 +45,7 @@ function validColor(c: string): boolean {
 function shapeScript(shape: string, n: number, color: string): string {
   const c = validColor(color) ? color : FALLBACK_COLOR;
   const inset = Math.max(1, Math.round(n / 5));
-  void c;
-  switch (shape) {
+  void c;  switch (shape) {
     case 'circle': {
       const cx = Math.floor(n / 2);
       return `circle ${cx},${cx} ${cx},${inset}`;
@@ -79,6 +100,7 @@ export function drawTools(): ToolDefinition[] {
           if (!fs.existsSync(out)) return { ok: false, error: 'image was not created' };
           const app = String(args.app ?? '').trim() || 'Preview';
           await execFileAsync('open', ['-a', app, out]);
+          pruneOldDrawings();
           return { ok: true, shape, size: n, savedTo: out, openedIn: app };
         } catch (err) {
           return { ok: false, error: err instanceof Error ? err.message : String(err) };

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 
 /**
@@ -82,6 +82,33 @@ export async function runPerms(): Promise<void> {
     note: 'needed for reminders; usually already granted',
   });
 
+  // Automation → Calendar (agenda + events).
+  checks.push({
+    label: 'Automation (Apple Events → Calendar)',
+    ok: await osascript('tell application "Calendar" to get name of every calendar'),
+    note: 'needed for calendar_agenda / calendar_add (daily briefing)',
+  });
+
+  // Camera — capture a still with imagesnap (or ffmpeg) to prove permission.
+  let camOk = false;
+  let camNote = 'camera_capture needs `brew install imagesnap` (or ffmpeg) + camera permission';
+  try {
+    if (spawnSync('which', ['imagesnap']).status === 0) {
+      const shot = path.join(os.tmpdir(), 'jarv-perms-cam.jpg');
+      await execFileAsync('imagesnap', ['-q', '-w', '1', shot], { timeout: 10_000 });
+      camOk = fs.existsSync(shot);
+      try {
+        fs.rmSync(shot, { force: true });
+      } catch {
+        /* ignore */
+      }
+      camNote = 'needed to see the room / the user (camera_capture)';
+    }
+  } catch {
+    camOk = false;
+  }
+  checks.push({ label: 'Camera (photo capture)', ok: camOk, note: camNote });
+
   let missing = false;
   for (const c of checks) {
     process.stdout.write(`${c.ok ? '[OK]   ' : '[MISS] '}${c.label} — ${c.note}\n`);
@@ -98,5 +125,6 @@ export async function runPerms(): Promise<void> {
   if (checks.find((c) => c.label.startsWith('Screen Recording') && !c.ok)) settingsPane('Privacy_ScreenCapture');
   if (checks.find((c) => c.label.startsWith('Full Disk Access') && !c.ok)) settingsPane('Privacy_AllFiles');
   if (checks.find((c) => c.label.startsWith('Automation') && !c.ok)) settingsPane('Privacy_Automation');
+  if (checks.find((c) => c.label.startsWith('Camera') && !c.ok)) settingsPane('Privacy_Camera');
   process.stdout.write('After allowing, re-run: jarv-genie perms  (it should then report all [OK])\n');
 }

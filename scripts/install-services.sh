@@ -49,13 +49,60 @@ write_plist() {
 EOF
 }
 
+# A plist that runs an arbitrary binary (used for the keep-awake daemon).
+write_bin_plist() {
+  local label="$1" args="$2" out="$3"
+  cat > "$out" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$label</string>
+    <key>ProgramArguments</key>
+    <array>
+        $args
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+    <key>StandardOutPath</key>
+    <string>/tmp/${label}.out</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/${label}.err</string>
+</dict>
+</plist>
+EOF
+}
+
 # Always-on web hub (phone/LAN/Tailscale access).
 write_plist "com.fortress.jarvgenie-hub" "<string>hub</string><string>--host</string><string>0.0.0.0</string><string>--port</string><string>3001</string><string>--no-open</string>" "$LAUNCH_DIR/com.fortress.jarvgenie-hub.plist"
 
 # Scheduled daemon (heartbeats, monitors).
 write_plist "com.fortress.jarvgenie-heartbeat" "<string>agent</string>" "$LAUNCH_DIR/com.fortress.jarvgenie-heartbeat.plist"
 
-SERVICES=(com.fortress.jarvgenie-hub com.fortress.jarvgenie-heartbeat)
+# Keep the Mac awake as a 24/7 node (prevent idle/system sleep while on power;
+# the display may still sleep). Opt out with JARV_GENIE_NO_KEEPAWAKE=1.
+if [ "${JARV_GENIE_NO_KEEPAWAKE:-0}" != "1" ]; then
+  write_bin_plist "com.fortress.jarvgenie-keepawake" "<string>/usr/bin/caffeinate</string><string>-ism</string>" "$LAUNCH_DIR/com.fortress.jarvgenie-keepawake.plist"
+  KEEPAWAKE_SVC=(com.fortress.jarvgenie-keepawake)
+else
+  KEEPAWAKE_SVC=()
+fi
+
+# Hands-free always-listening voice daemon (wake word). Opt in with
+# JARV_GENIE_ENABLE_VOICE=1 — it keeps a microphone hot 24/7. Requires
+# sox (`rec`) + whisper.cpp and mic permission, else the service crash-loops.
+VOICE_SVC=()
+if [ "${JARV_GENIE_ENABLE_VOICE:-0}" = "1" ]; then
+  write_plist "com.fortress.jarvgenie-voice" "<string>voice</string><string>--wake</string><string>--quiet</string>" "$LAUNCH_DIR/com.fortress.jarvgenie-voice.plist"
+  VOICE_SVC=(com.fortress.jarvgenie-voice)
+fi
+
+SERVICES=(com.fortress.jarvgenie-hub com.fortress.jarvgenie-heartbeat "${KEEPAWAKE_SVC[@]}" "${VOICE_SVC[@]}")
 
 # Telegram bridge (remote chat + explicit-consent approvals) — needs only the
 # bot token; the first person to message the bot becomes the owner.
@@ -82,3 +129,9 @@ for svc in "${SERVICES[@]}"; do
 done
 
 echo "done. hub reachable at: $NODE_BIN $DIST hub --url"
+echo
+echo "to make Jarv truly 24/7 (like a butler who never sleeps):"
+echo "  sudo pmset -a sleep 0 disablesleep 1   # machine never sleeps on any power source"
+echo "  System Settings > Users & Groups > auto-login   # it starts before you log in"
+echo "  enable always-listening voice:  JARV_GENIE_ENABLE_VOICE=1 bash scripts/install-services.sh"
+echo "  (you need sox + whisper.cpp and mic permission; run \`jarv-genie perms\` to check)"

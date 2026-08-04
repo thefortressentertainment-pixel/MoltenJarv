@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { getSecretStore } from '../config/secrets.js';
 import { setApprovalHandler } from '../approvals.js';
+import { ensureResources, tryAcquireBusy, releaseBusy } from '../resource.js';
 import { TelegramClient, type TgUpdate } from '../telegram/client.js';
 import { TaskRunner } from '../agent/taskrunner.js';
 import type { AgentContext } from './index.js';
@@ -95,7 +96,14 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
 
   const processMessage = async (text: string): Promise<void> => {
     process.stdout.write(`[jarv-genie] telegram <- ${text.slice(0, 120)}\n`);
+    const acquired = tryAcquireBusy();
     try {
+      const guard = await ensureResources();
+      if (guard === 'blocked') {
+        await client.sendMessage(chatId!, '⚠️ Memory is critically low right now — hold on, give me a minute, then try again.');
+        return;
+      }
+      if (guard === 'cleaned') process.stdout.write('[jarv-genie] freed memory before task\n');
       const result = await runner.run(text);
       process.stdout.write(`[jarv-genie] telegram -> ${(result.text || '(no response)').slice(0, 160)}\n`);
       await client.sendMessage(chatId!, result.text || '(no response)');
@@ -103,6 +111,8 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
       const message = err instanceof Error ? err.message : String(err);
       process.stdout.write(`[jarv-genie] telegram ERROR: ${message}\n`);
       await client.sendMessage(chatId!, `⚠️ ${message}`);
+    } finally {
+      if (acquired) releaseBusy();
     }
   };
 

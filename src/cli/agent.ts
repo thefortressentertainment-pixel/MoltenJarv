@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { isBusy } from '../resource.js';
 import { cronMatches, parseCron, previousFire } from '../scheduler/cron.js';
 import {
   loadAgentConfig,
@@ -20,6 +21,10 @@ function notify(text: string): void {
 }
 
 export async function runAgentSchedule(cfg: AgentConfig, backend: ChatBackend): Promise<void> {
+  if (isBusy()) {
+    process.stdout.write('[jarv-genie] busy — skipping schedules this tick\n');
+    return;
+  }
   const state = loadAgentState();
   const now = new Date();
   const minuteKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()} ${now.getHours()}:${now.getMinutes()}`;

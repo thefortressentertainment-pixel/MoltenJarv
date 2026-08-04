@@ -17,6 +17,10 @@ export interface ComputerConfig {
   visionModel?: string;
   /** Vision endpoint (OpenAI-compatible). Default: the primary endpoint. */
   visionEndpoint?: string;
+  /** Vision model used for camera captures. Default: visionModel. */
+  cameraModel?: string;
+  /** Vision endpoint used for camera captures. Default: visionEndpoint. */
+  cameraEndpoint?: string;
 }
 
 export function computerStatus(config?: JarvGenieConfig): { implemented: boolean; note: string } {
@@ -37,9 +41,29 @@ export async function screenshot(file: string): Promise<void> {
 /** Describe what is on the screen using a vision-capable model. */
 export async function describeScreen(file: string, config: JarvGenieConfig, question?: string): Promise<string> {
   const comp = (config as unknown as { computer?: ComputerConfig }).computer ?? {};
+  return describeImage(file, config, {
+    question,
+    model: comp.visionModel,
+    endpoint: comp.visionEndpoint,
+    defaultPrompt: 'Describe what is visible on this screen, concisely. Mention any windows and their titles.',
+  });
+}
+
+export interface DescribeImageOptions {
+  question?: string;
+  /** Model override (default: configured vision/camera model). */
+  model?: string;
+  /** Endpoint override (default: configured vision/camera endpoint). */
+  endpoint?: string;
+  /** Prompt used when no question is given. */
+  defaultPrompt?: string;
+}
+
+/** Describe any image (screen grab or camera frame) using a vision-capable model. */
+export async function describeImage(file: string, config: JarvGenieConfig, opts: DescribeImageOptions = {}): Promise<string> {
   const primary = config.providers.primary;
-  const baseUrl = comp.visionEndpoint ?? primary.baseUrl ?? 'http://127.0.0.1:11434/v1';
-  const model = comp.visionModel ?? 'llama3.2-vision';
+  const baseUrl = opts.endpoint ?? primary.baseUrl ?? 'http://127.0.0.1:11434/v1';
+  const model = opts.model ?? 'llama3.2-vision';
   const key = resolveApiKey(primary) ?? 'not-set';
   const b64 = await fs.readFile(file).then((b) => b.toString('base64'));
 
@@ -49,7 +73,7 @@ export async function describeScreen(file: string, config: JarvGenieConfig, ques
       {
         role: 'user',
         content: [
-          { type: 'text', text: question ?? 'Describe what is visible on this screen, concisely. Mention any windows and their titles.' },
+          { type: 'text', text: opts.question ?? opts.defaultPrompt ?? 'Describe this image concisely.' },
           { type: 'image_url', image_url: { url: `data:image/png;base64,${b64}` } },
         ],
       },
@@ -64,6 +88,73 @@ export async function describeScreen(file: string, config: JarvGenieConfig, ques
   const data = (await res.json()) as { choices?: Array<{ message?: { content?: string | null } }>; error?: { message?: string } };
   if (!res.ok) throw new Error(data.error?.message ?? `vision request failed: HTTP ${res.status}`);
   return data.choices?.[0]?.message?.content ?? '';
+}
+
+/**
+ * Capture a still from the built-in (or first available) camera to a JPG.
+ * Uses `imagesnap` when installed, else `ffmpeg` (avfoundation). Requires
+ * macOS camera permission for the responsible app.
+ */
+export async function captureCamera(file: string): Promise<void> {
+  if (process.platform !== 'darwin') throw new Error('camera capture requires macOS');
+  const ext = file.toLowerCase().endsWith('.jpg') || file.toLowerCase().endsWith('.jpeg') ? file : file + '.jpg';
+
+  if (await hasCommand('imagesnap')) {
+    try {
+      // -w 1 gives the sensor a moment to expose; -q silences output.
+      await execFileAsync('imagesnap', ['-q', '-w', '1', ext]);
+      return;
+    } catch (err) {
+      const e = err as { stderr?: string };
+      if (e.stderr && /No cameras|no camera/i.test(e.stderr)) {
+        throw new Error('no camera found by imagesnap');
+      }
+      // fall through to ffmpeg on other failures
+    }
+  }
+
+  if (await hasCommand('ffmpeg')) {
+    const device = await pickCameraDevice();
+    if (!device) throw new Error('no FaceTime/camera device found by ffmpeg');
+    await execFileAsync('ffmpeg', [
+      '-loglevel', 'error',
+      '-f', 'avfoundation',
+      '-video_size', '1280x720',
+      '-framerate', '1',
+      '-i', device,
+      '-frames:v', '1',
+      '-y',
+      ext,
+    ]);
+    return;
+  }
+
+  throw new Error(
+    'no camera capture tool installed — run `brew install imagesnap` (or install ffmpeg) and grant camera permission, then try again',
+  );
+}
+
+async function pickCameraDevice(): Promise<string | null> {
+  try {
+    const res = await execFileAsync('ffmpeg', ['-f', 'avfoundation', '-list_devices', 'true', '-i', ''], { timeout: 10_000 });
+    const names = res.stderr ?? '';
+    const candidates = names
+      .split('\n')
+      .filter((l) => /\[AVFoundation\]/.test(l) && /(FaceTime|Camera|Webcam)/i.test(l))
+      .map((l) => (l.match(/\[(\d+)\]/)?.[1] ?? ''));
+    return candidates[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function hasCommand(cmd: string): Promise<boolean> {
+  try {
+    await execFileAsync('which', [cmd]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function openApp(app: string): Promise<void> {
