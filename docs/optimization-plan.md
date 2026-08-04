@@ -1,3 +1,4 @@
+<!-- Self-optimization plan for Jarv Genie. The soul is injected into the system prompt at src/agent/agent.ts:68 via composeSystemPrompt (src/config/soul.ts:60). -->
 # Jarv Genie — Self-Optimization Plan
 
 Goal: Jarv can do anything the user can do on this Mac, from anywhere, with

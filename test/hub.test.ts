@@ -148,8 +148,8 @@ test('RemoteClient talks to the hub with its token', async () => {
 
     const deltas: string[] = [];
     const streamed = await good.chatStream('hi', (d) => deltas.push(d));
-    assert.deepStrictEqual(deltas, ['echo: hi']);
-    assert.strictEqual(streamed.text, 'echo: hi');
+    assert.deepStrictEqual(deltas, ['echo-', 'stream']);
+    assert.strictEqual(streamed.text, 'echo-stream');
     assert.strictEqual(streamed.model, 'fake-model');
 
     const bad = new RemoteClient(url, 'jarv-nope');

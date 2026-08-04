@@ -137,7 +137,8 @@ test('POST /api/chat with stream:true emits SSE text deltas', async () => {
     assert.strictEqual(res.status, 200);
     assert.match(res.headers.get('content-type') ?? '', /text\/event-stream/);
     const body = await res.text();
-    assert.match(body, /data: \{"text":"echo: hi"\}/);
+    assert.match(body, /data: \{"text":"hel"\}/);
+    assert.match(body, /data: \{"text":"lo"\}/);
     assert.match(body, /data: \{"meta":\{"provider":"fake"/);
   });
 });

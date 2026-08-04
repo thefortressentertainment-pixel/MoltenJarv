@@ -28,6 +28,13 @@ const IGNORED = new Set([
   'tmp',
 ]);
 
+const REPO_ROOT = '/Users/tfe/jarv-genie';
+
+/** Absolute paths as-is; relative paths resolve against the repo root. */
+function resolvePath(p: string): string {
+  return path.isAbsolute(p) ? path.resolve(p) : path.resolve(REPO_ROOT, p);
+}
+
 /** Treat a file as binary if it contains a null byte in its head — skip those. */
 function isBinary(buf: Buffer): boolean {
   const head = buf.subarray(0, 8000);
@@ -76,7 +83,7 @@ export function codeTools(): ToolDefinition[] {
         } catch {
           return { ok: false, error: `invalid regex: ${raw}` };
         }
-        const dir = args.dir ? path.resolve(String(args.dir)) : '/Users/tfe/jarv-genie';
+        const dir = args.dir ? resolvePath(String(args.dir)) : REPO_ROOT;
         const maxResults = Math.max(1, Math.min(200, Math.trunc(Number(args.maxResults ?? 30) || 30)));
         const files: string[] = [];
         walk(dir, 0, files);
@@ -108,11 +115,11 @@ export function codeTools(): ToolDefinition[] {
     {
       name: 'code_edit',
       description:
-        'Make ONE precise, verified edit to a file: find an exact string and replace it. The string must appear exactly once, otherwise it refuses (no guesswork, no accidental multi-edit). Returns the affected line before/after. Use for small surgical changes; run self_review after to verify.',
+        'Make ONE precise, verified edit to a file: find an exact string and replace it. The string must appear exactly once, otherwise it refuses (no guesswork, no accidental multi-edit). Path may be absolute or relative to the repo (/Users/tfe/jarv-genie). Returns the affected line before/after. Use for small surgical changes; run self_review after to verify.',
       inputSchema: {
         type: 'object',
         properties: {
-          path: { type: 'string', description: 'Absolute path to the file.' },
+          path: { type: 'string', description: 'Path to the file (absolute or relative to /Users/tfe/jarv-genie).' },
           find: { type: 'string', description: 'Exact text to find (must appear exactly once).' },
           replace: { type: 'string', description: 'Replacement text.' },
         },
@@ -120,7 +127,7 @@ export function codeTools(): ToolDefinition[] {
       },
       consequential: true,
       handler: async (args) => {
-        const file = path.resolve(String(args.path ?? '').trim());
+        const file = resolvePath(String(args.path ?? '').trim());
         const find = String(args.find ?? '');
         const replace = String(args.replace ?? '');
         if (!file || !find) return { ok: false, error: 'code_edit requires path and find' };

@@ -1,22 +1,21 @@
 import type { ModelRouter } from '../providers/index.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { JarvGenieConfig } from '../config/index.js';
-import type { ChatMessage, MemoryService, ToolCall, ToolContext, ToolDefinition } from './types.js';
+import type { ChatMessage, MemoryService, ToolCall, ToolContext } from './types.js';
 import { approvalActive, requireApproval } from '../approvals.js';
 import { extractTextToolCalls } from './agent.js';
 
 /**
- * Plan → execute → report task runner. Unlike the conversational Agent, this
- * never mixes the user's chat history into the working context:
+ * Iterative plan→execute loop task runner. Unlike the conversational Agent,
+ * this never mixes the user's chat history into the working context:
  *
- *   1. PLAN: ask the model (clean context, real tools exposed for native
- *      function calling) what it wants to do — a set of tool calls or an answer.
- *   2. EXECUTE: run each planned tool for real, with the consent gate applied
- *      to consequential tools.
- *   3. REPORT: ask the model to summarize the actual results honestly.
+ *   loop: ask the model (clean context, real tools exposed) → run each tool it
+ *   calls (consent-gated) → feed the real results back → repeat until it gives
+ *   a text answer or the step budget runs out.
  *
- * The result is sent back to the user; the working context is discarded. This
- * is what keeps Jarv from getting confused by the conversation and faking work.
+ * Multi-step tasks (search → edit → verify) work because the model sees each
+ * tool's actual result before deciding the next move. The working context is
+ * discarded afterwards, so nothing pollutes the conversation.
  */
 
 export interface TaskRunnerOptions {
@@ -37,41 +36,16 @@ export interface TaskResult {
 export class TaskRunner {
   constructor(private opts: TaskRunnerOptions) {}
 
-  private async ask(messages: ChatMessage[], tools: ToolDefinition[]): Promise<{ content: string | null; toolCalls: ToolCall[] | null; provider: string; model: string }> {
-    const chat = await this.opts.router.chat({ messages, tools });
-    return { content: chat.content, toolCalls: chat.toolCalls ?? null, provider: chat.provider, model: chat.model };
-  }
-
-  private async plan(input: string): Promise<{ calls: ToolCall[] | null; answer: string; provider: string; model: string }> {
+  private systemPrompt(): string {
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-    const system = `You are Jarv Genie, a helpful assistant running on the user's Mac. Today is ${today}.
+    return `You are Jarv Genie, a helpful assistant running on the user's Mac. Today is ${today}.
 Answer the user directly and concisely, or use the provided tools to complete their request when useful.
-You have shell, UI-control, file, image-drawing, scheduling, and web tools. You can open or install apps, run commands, draw shapes, type, and click.
+You have shell, UI-control, file, image-drawing, scheduling, web, and code tools. You can open or install apps, run commands, draw shapes, type, click, and edit code.
+When using code_search, search for SPECIFIC identifiers (function or class names like composeSystemPrompt) rather than vague words — vague terms match documentation and miss the source.
+You can take several tool steps in sequence; after each result you decide the next one, until you have enough to answer.
 Never say you cannot do something unless you actually tried the tools and they failed.
 For schedules use numeric cron fields (0-6, Sunday=0, Saturday=6) and ISO 8601 dates relative to today.
 Be honest: only ever claim an action succeeded if its tool result says it did.`;
-    const messages: ChatMessage[] = [
-      { role: 'system', content: system },
-      { role: 'user', content: input },
-    ];
-    const toolNames = this.opts.tools.list().map((t) => t.name);
-
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const res = await this.ask(messages, this.opts.tools.list());
-      if (res.toolCalls && res.toolCalls.length > 0) {
-        return { calls: res.toolCalls, answer: '', provider: res.provider, model: res.model };
-      }
-      const content = (res.content ?? '').trim();
-      // Fallback: the model may have written a tool call as text.
-      const extracted = content ? extractTextToolCalls(content, toolNames) : [];
-      if (extracted.length > 0) {
-        const calls: ToolCall[] = extracted.map((e, i) => ({ id: `text-${i}`, name: e.name, arguments: e.args }));
-        return { calls, answer: '', provider: res.provider, model: res.model };
-      }
-      if (content) return { calls: null, answer: content, provider: res.provider, model: res.model };
-      messages.push({ role: 'system', content: 'Your response was empty. Answer the user or call a tool.' });
-    }
-    return { calls: null, answer: "I couldn't produce a response. Please try again.", provider: 'primary', model: 'qwen2.5:3b' };
   }
 
   private async execute(calls: ToolCall[]): Promise<Array<Record<string, unknown>>> {
@@ -106,56 +80,118 @@ Be honest: only ever claim an action succeeded if its tool result says it did.`;
     return results;
   }
 
-  private async report(input: string, results: Array<Record<string, unknown>>): Promise<{ text: string; provider: string; model: string }> {
-    const system =
-      'You are reporting what was just executed on the user\'s machine. Summarize concisely and naturally what happened and the outcome. If a step failed, was denied, or did nothing, say so honestly — never claim something succeeded that did not.';
-    const messages: ChatMessage[] = [
-      { role: 'system', content: system },
-      { role: 'user', content: `Request: ${input}\n\nTool results:\n${JSON.stringify(results, null, 2)}` },
-    ];
-    let res = await this.ask(messages, []);
-    for (let attempt = 0; attempt < 2 && !(res.content ?? '').trim(); attempt++) {
-      messages.push({ role: 'system', content: 'Your report was empty. Give the user a short, honest summary of the results.' });
-      res = await this.ask(messages, []);
-    }
-    const text = (res.content ?? '').trim();
-    if (text) return { text, provider: res.provider, model: res.model };
-    return { text: `Done. Results:\n${JSON.stringify(results, null, 2)}`, provider: res.provider, model: res.model };
-  }
-
   async run(input: string): Promise<TaskResult> {
-    const { calls, answer, provider, model } = await this.plan(input);
+    const messages: ChatMessage[] = [
+      { role: 'system', content: this.systemPrompt() },
+      { role: 'user', content: input },
+    ];
+    const maxSteps = Math.max(1, this.opts.config.agent?.maxSteps ?? 8);
+    const toolNames = this.opts.tools.list().map((t) => t.name);
+    let steps = 0;
+    let toolCalls = 0;
+    let provider = 'primary';
+    let model = 'local';
+    let text = '';
+    let nudged = false;
 
-    if (!calls || calls.length === 0) {
-      return { text: answer || '(no response)', steps: 1, toolCalls: 0, provider, model };
+    while (steps < maxSteps) {
+      steps++;
+      const chat = await this.opts.router.chat({ messages, tools: this.opts.tools.list() });
+      provider = chat.provider;
+      model = chat.model;
+      messages.push({ role: 'assistant', content: chat.content, toolCalls: chat.toolCalls ?? undefined });
+
+      if (!chat.toolCalls || chat.toolCalls.length === 0) {
+        const content = (chat.content ?? '').trim();
+        const extracted = content ? extractTextToolCalls(content, toolNames) : [];
+        if (extracted.length > 0) {
+          toolCalls += extracted.length;
+          const calls: ToolCall[] = extracted.map((e, i) => ({ id: `text-${i}`, name: e.name, arguments: e.args }));
+          const results = await this.execute(calls);
+          results.forEach((r, i) => messages.push({ role: 'tool', toolCallId: calls[i]?.id ?? '', name: calls[i]?.name ?? '', content: JSON.stringify(r) }));
+          continue;
+        }
+        if (content) {
+          text = content;
+          break;
+        }
+        if (!nudged) {
+          nudged = true;
+          messages.push({ role: 'system', content: 'Your response was empty. Answer the user or call a tool.' });
+          continue;
+        }
+        text = "I couldn't produce a response. Please try again.";
+        break;
+      }
+
+      toolCalls += chat.toolCalls.length;
+      const results = await this.execute(chat.toolCalls);
+      chat.toolCalls.forEach((call, i) => {
+        messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: JSON.stringify(results[i] ?? {}) });
+      });
     }
 
-    const results = await this.execute(calls);
-    const reported = await this.report(input, results);
-    return { text: reported.text, steps: 2, toolCalls: calls.length, provider: reported.provider, model: reported.model };
+    return { text: text || "I couldn't complete that within my step budget. Please try again.", steps, toolCalls, provider, model };
   }
 
-  /**
-   * Same plan→execute→report flow, but streams the final report's text deltas
-   * via `onDelta`. Planning and execution are hidden; only the summary streams.
-   */
+  /** Same iterative loop, streaming only the final answer's text deltas. */
   async runStream(input: string, onDelta: (delta: string) => void): Promise<TaskResult> {
-    const { calls, answer, provider, model } = await this.plan(input);
+    const messages: ChatMessage[] = [
+      { role: 'system', content: this.systemPrompt() },
+      { role: 'user', content: input },
+    ];
+    const maxSteps = Math.max(1, this.opts.config.agent?.maxSteps ?? 8);
+    const toolNames = this.opts.tools.list().map((t) => t.name);
+    let steps = 0;
+    let toolCalls = 0;
+    let provider = 'primary';
+    let model = 'local';
+    let text = '';
+    let nudged = false;
 
-    if (!calls || calls.length === 0) {
-      onDelta(answer || '(no response)');
-      return { text: answer || '(no response)', steps: 1, toolCalls: 0, provider, model };
+    while (steps < maxSteps) {
+      steps++;
+      const buffered: string[] = [];
+      const chat = await this.opts.router.streamChat(
+        { messages, tools: this.opts.tools.list() },
+        (d) => buffered.push(d),
+      );
+      provider = chat.provider;
+      model = chat.model;
+      messages.push({ role: 'assistant', content: chat.content, toolCalls: chat.toolCalls ?? undefined });
+
+      if (!chat.toolCalls || chat.toolCalls.length === 0) {
+        const content = (chat.content ?? '').trim();
+        const extracted = content ? extractTextToolCalls(content, toolNames) : [];
+        if (extracted.length > 0) {
+          toolCalls += extracted.length;
+          const calls: ToolCall[] = extracted.map((e, i) => ({ id: `text-${i}`, name: e.name, arguments: e.args }));
+          const results = await this.execute(calls);
+          results.forEach((r, i) => messages.push({ role: 'tool', toolCallId: calls[i]?.id ?? '', name: calls[i]?.name ?? '', content: JSON.stringify(r) }));
+          continue;
+        }
+        if (content) {
+          text = content;
+          for (const d of buffered) onDelta(d);
+          break;
+        }
+        if (!nudged) {
+          nudged = true;
+          messages.push({ role: 'system', content: 'Your response was empty. Answer the user or call a tool.' });
+          continue;
+        }
+        text = "I couldn't produce a response. Please try again.";
+        for (const d of buffered) onDelta(d);
+        break;
+      }
+
+      toolCalls += chat.toolCalls.length;
+      const results = await this.execute(chat.toolCalls);
+      chat.toolCalls.forEach((call, i) => {
+        messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: JSON.stringify(results[i] ?? {}) });
+      });
     }
 
-    const results = await this.execute(calls);
-    const system =
-      'You are reporting what was just executed on the user\'s machine. Summarize concisely and naturally what happened and the outcome. If a step failed, was denied, or did nothing, say so honestly — never claim something succeeded that did not.';
-    const messages: ChatMessage[] = [
-      { role: 'system', content: system },
-      { role: 'user', content: `Request: ${input}\n\nTool results:\n${JSON.stringify(results, null, 2)}` },
-    ];
-    const chat = await this.opts.router.streamChat({ messages, tools: [] }, onDelta);
-    const text = (chat.content ?? '').trim();
-    return { text: text || 'Done.', steps: 2, toolCalls: calls.length, provider: chat.provider, model: chat.model };
+    return { text: text || "I couldn't complete that within my step budget. Please try again.", steps, toolCalls, provider, model };
   }
 }

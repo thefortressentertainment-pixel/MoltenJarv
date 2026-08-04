@@ -59,6 +59,23 @@ test('code_edit refuses when the find text is missing or ambiguous', async () =>
   }
 });
 
+test('code_edit resolves a repo-relative path', async () => {
+  // The repo's docs/optimization-plan.md exists and is editable.
+  const tool = codeTools().find((t) => t.name === 'code_edit')!;
+  const file = 'docs/optimization-plan.md';
+  const marker = `<!-- jarv-code-edit-test ${Date.now()} -->\n`;
+  const res = (await tool.handler({ path: file, find: '# Jarv Genie — Self-Optimization Plan', replace: marker + '# Jarv Genie — Self-Optimization Plan' }, ctx)) as {
+    ok: boolean;
+    file: string;
+    error?: string;
+  };
+  // Revert regardless so the repo stays clean.
+  const revert = (await tool.handler({ path: file, find: marker + '# Jarv Genie — Self-Optimization Plan', replace: '# Jarv Genie — Self-Optimization Plan' }, ctx)) as { ok: boolean };
+  assert.strictEqual(res.ok, true, res.error);
+  assert.match(res.file, /docs[\\/]optimization-plan\.md$/);
+  assert.strictEqual(revert.ok, true);
+});
+
 test('code_search finds matches and skips nothing important', async () => {
   const dir = tmpDir();
   try {
