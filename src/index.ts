@@ -212,7 +212,7 @@ async function main(): Promise<void> {
 
   if (raw[0] === 'telegram') {
     const ctx = await buildAgent();
-    await runTelegram(localBackend(ctx));
+    await runTelegram(ctx);
     return;
   }
 

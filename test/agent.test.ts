@@ -145,3 +145,41 @@ test('hallucinated tool names are corrected with the available tool list', async
     t.cleanup();
   }
 });
+
+test('text-encoded tool calls are intercepted and executed for real', async () => {
+  const executed: string[] = [];
+  const tools = {
+    list: () => [{ name: 'get_datetime' }],
+    execute: async (name: string) => {
+      executed.push(name);
+      return { ok: true, result: { now: '2026-08-01' } };
+    },
+  };
+  let calls = 0;
+  const router = {
+    streamChat: async () => {
+      calls++;
+      if (calls === 1) {
+        return { content: 'get_datetime --timezone "US/Eastern"', toolCalls: null, provider: 'fake', model: 'fake' };
+      }
+      return { content: 'The time tool ran.', toolCalls: null, provider: 'fake', model: 'fake' };
+    },
+    chat: async () => {
+      calls++;
+      if (calls === 1) {
+        return { content: 'get_datetime --timezone "US/Eastern"', toolCalls: null, provider: 'fake', model: 'fake' };
+      }
+      return { content: 'The time tool ran.', toolCalls: null, provider: 'fake', model: 'fake' };
+    },
+  };
+  const memory = { sessionLoad: async () => [], sessionAppend: async () => {}, sessionReset: async () => {} };
+  const agent = new Agent({
+    router: router as never,
+    tools: tools as never,
+    memory: memory as never,
+    config: { agent: { systemPrompt: 'sys', maxSteps: 3, workdir: '/tmp' } } as never,
+  });
+  const result = await agent.run('what time is it');
+  assert.deepStrictEqual(executed, ['get_datetime'], 'text tool call executed for real');
+  assert.strictEqual(result.text, 'The time tool ran.');
+});

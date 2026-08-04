@@ -3,7 +3,27 @@ import { loadSoul, composeSystemPrompt } from '../config/soul.js';
 import { approvalActive, requireApproval } from '../approvals.js';
 import type { ModelRouter } from '../providers/index.js';
 import type { ToolRegistry } from '../tools/registry.js';
-import type { ChatMessage, MemoryService, ToolContext } from './types.js';
+import type { ChatMessage, MemoryService, ToolCall, ToolContext } from './types.js';
+
+/** Parse tool invocations written as text, e.g. `schedule_add --cron "0 7 * * 6" --prompt "x"`. */
+function extractTextToolCalls(text: string, toolNames: string[]): Array<{ name: string; args: Record<string, unknown> }> {
+  const out: Array<{ name: string; args: Record<string, unknown> }> = [];
+  for (const name of toolNames) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`\\b${escaped}\\b((?:\\s+--[\\w-]+\\s+(?:"[^"]*"|'[^']*'|\\S+))+)`, 'g');
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      const args: Record<string, unknown> = {};
+      const pairRe = /--([\w-]+)\s+(?:"([^"]*)"|'([^']*)'|([^\s"'"]+))/g;
+      let p: RegExpExecArray | null;
+      while ((p = pairRe.exec(m[1] ?? '')) !== null) {
+        args[p[1] ?? ''] = p[2] ?? p[3] ?? p[4] ?? '';
+      }
+      if (Object.keys(args).length > 0) out.push({ name, args });
+    }
+  }
+  return out;
+}
 
 export interface AgentResult {
   text: string;
@@ -55,6 +75,8 @@ export class Agent {
     let text = '';
     let provider = '';
     let model = '';
+    let nudged = false;
+    let errorNudged = false;
 
     while (steps < config.agent.maxSteps) {
       steps++;
@@ -72,49 +94,51 @@ export class Agent {
 
       messages.push({ role: 'assistant', content: chat.content, toolCalls: chat.toolCalls ?? undefined });
 
+      const ctx: ToolContext = { memory: this.opts.memory, config, workdir: config.agent.workdir };
+      const toolNames = this.opts.tools.list().map((t) => t.name);
+
       if (!chat.toolCalls || chat.toolCalls.length === 0) {
-        text = chat.content ?? '';
+        const content = chat.content ?? '';
+        // The model may have written a tool invocation as text instead of calling
+        // it. Intercept those and execute them for real (still consent-gated).
+        const extracted = content.trim() ? extractTextToolCalls(content, toolNames) : [];
+        if (extracted.length > 0) {
+          toolCalls += extracted.length;
+          let i = 0;
+          for (const e of extracted) {
+            const errored = await this.executeCall({ id: `text-${i++}`, name: e.name, arguments: e.args }, messages, ctx, toolNames);
+            if (errored && !errorNudged) {
+              errorNudged = true;
+              messages.push({ role: 'system', content: 'A tool you called returned an error. Report this to the user honestly: say the action did NOT succeed and why. Do not claim it succeeded.' });
+            }
+          }
+          continue;
+        }
+        if (content.trim()) {
+          text = content;
+          if (emit && onDelta) for (const d of buffered) onDelta(d);
+          break;
+        }
+        if (!nudged) {
+          nudged = true;
+          messages.push({
+            role: 'system',
+            content: 'Your last response was empty. Respond to the user directly with a short text answer, using tools if needed.',
+          });
+          continue;
+        }
+        text = "I couldn't produce a response just now. Please rephrase, or try again.";
         if (emit && onDelta) for (const d of buffered) onDelta(d);
         break;
       }
 
       toolCalls += chat.toolCalls.length;
-      const ctx: ToolContext = { memory: this.opts.memory, config, workdir: config.agent.workdir };
-
-      const toolNames = this.opts.tools.list().map((t) => t.name);
       for (const call of chat.toolCalls) {
-        if (!toolNames.includes(call.name)) {
-          messages.push({
-            role: 'tool',
-            toolCallId: call.id,
-            name: call.name,
-            content: JSON.stringify({
-              error: `Unknown tool "${call.name}". Available tools: ${toolNames.join(', ')}. Choose one of these.`,
-            }),
-          });
-          continue;
+        const errored = await this.executeCall(call, messages, ctx, toolNames);
+        if (errored && !errorNudged) {
+          errorNudged = true;
+          messages.push({ role: 'system', content: 'A tool you called returned an error. Report this to the user honestly: say the action did NOT succeed and why. Do not claim it succeeded.' });
         }
-        const def = this.opts.tools.list().find((t) => t.name === call.name);
-        if (def?.consequential && approvalActive()) {
-          const desc = `${call.name}${JSON.stringify(call.arguments ?? {})}`;
-          const approved = await requireApproval(desc);
-          if (!approved) {
-            messages.push({
-              role: 'tool',
-              toolCallId: call.id,
-              name: call.name,
-              content: JSON.stringify({ error: 'the user denied this action — do not perform it' }),
-            });
-            continue;
-          }
-        }
-        const { ok, result } = await this.opts.tools.execute(call.name, call.arguments, ctx);
-        messages.push({
-          role: 'tool',
-          toolCallId: call.id,
-          name: call.name,
-          content: ok ? JSON.stringify(result) : JSON.stringify({ error: result }),
-        });
       }
     }
 
@@ -123,5 +147,41 @@ export class Agent {
     }
 
     return { text, steps, toolCalls, provider, model };
+  }
+
+  /** Run one tool call with the consent gate. Returns true if the call errored. */
+  private async executeCall(call: ToolCall, messages: ChatMessage[], ctx: ToolContext, toolNames: string[]): Promise<boolean> {
+    if (!toolNames.includes(call.name)) {
+      messages.push({
+        role: 'tool',
+        toolCallId: call.id,
+        name: call.name,
+        content: JSON.stringify({
+          error: `Unknown tool "${call.name}". Available tools: ${toolNames.join(', ')}. Choose one of these.`,
+        }),
+      });
+      return true;
+    }
+    const def = this.opts.tools.list().find((t) => t.name === call.name);
+    if (def?.consequential && approvalActive()) {
+      const approved = await requireApproval(`${call.name}${JSON.stringify(call.arguments ?? {})}`);
+      if (!approved) {
+        messages.push({
+          role: 'tool',
+          toolCallId: call.id,
+          name: call.name,
+          content: JSON.stringify({ error: 'the user denied this action — do not perform it' }),
+        });
+        return true;
+      }
+    }
+    const { ok, result } = await this.opts.tools.execute(call.name, call.arguments, ctx);
+    messages.push({
+      role: 'tool',
+      toolCallId: call.id,
+      name: call.name,
+      content: ok ? JSON.stringify(result) : JSON.stringify({ error: result }),
+    });
+    return !ok;
   }
 }

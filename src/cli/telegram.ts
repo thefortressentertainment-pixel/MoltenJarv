@@ -2,8 +2,8 @@ import { spawn } from 'node:child_process';
 import { getSecretStore } from '../config/secrets.js';
 import { setApprovalHandler } from '../approvals.js';
 import { TelegramClient, type TgUpdate } from '../telegram/client.js';
-import type { ChatBackend } from './backend.js';
-import { SESSION } from './index.js';
+import { TaskRunner } from '../agent/taskrunner.js';
+import type { AgentContext } from './index.js';
 
 /**
  * Telegram bridge: run `jarv-genie telegram`. Polls the bot for messages from
@@ -54,7 +54,7 @@ function keepAwake(): void {
   }
 }
 
-export async function runTelegram(backend: ChatBackend): Promise<void> {
+export async function runTelegram(ctx: AgentContext): Promise<void> {
   const secrets = getSecretStore();
   const token = secrets.get('TELEGRAM_BOT_TOKEN');
   if (!token) {
@@ -65,6 +65,12 @@ export async function runTelegram(backend: ChatBackend): Promise<void> {
   let chatId = secrets.get('TELEGRAM_CHAT_ID');
   keepAwake();
 
+  const runner = new TaskRunner({
+    router: ctx.router,
+    tools: ctx.tools,
+    memory: ctx.memory,
+    config: ctx.config,
+  });
   const client = new TelegramClient(token);
   const me = await client.getMe();
   process.stdout.write(`[jarv-genie] telegram online as @${me.username ?? me.id}\n`);
@@ -77,6 +83,7 @@ export async function runTelegram(backend: ChatBackend): Promise<void> {
 
   setApprovalHandler((question: string) => {
     if (!chatId) return Promise.resolve(false);
+    process.stdout.write(`[jarv-genie] telegram approval requested: ${question.slice(0, 120)}\n`);
     return client
       .sendMessage(chatId, `🔒 Jarv wants approval for:\n\n${question}\n\nReply **yes** to allow, **no** to deny.`)
       .then(() => new Promise<boolean>((resolve) => (pendingResolve = resolve)));
@@ -87,11 +94,15 @@ export async function runTelegram(backend: ChatBackend): Promise<void> {
   let chain: Promise<void> = Promise.resolve();
 
   const processMessage = async (text: string): Promise<void> => {
+    process.stdout.write(`[jarv-genie] telegram <- ${text.slice(0, 120)}\n`);
     try {
-      const result = await backend.chat(text);
+      const result = await runner.run(text);
+      process.stdout.write(`[jarv-genie] telegram -> ${(result.text || '(no response)').slice(0, 160)}\n`);
       await client.sendMessage(chatId!, result.text || '(no response)');
     } catch (err) {
-      await client.sendMessage(chatId!, `⚠️ ${err instanceof Error ? err.message : String(err)}`);
+      const message = err instanceof Error ? err.message : String(err);
+      process.stdout.write(`[jarv-genie] telegram ERROR: ${message}\n`);
+      await client.sendMessage(chatId!, `⚠️ ${message}`);
     }
   };
 
