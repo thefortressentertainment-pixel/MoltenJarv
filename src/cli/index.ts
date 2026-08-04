@@ -14,6 +14,7 @@ import { speechTools } from '../tools/speech.js';
 import { ToolRegistry } from '../tools/registry.js';
 import { timeTools } from '../tools/time.js';
 import { webTools } from '../tools/web.js';
+import { moltbookTools } from '../tools/moltbook.js';
 
 const SESSION = 'default';
 
@@ -32,7 +33,7 @@ export async function buildAgent(): Promise<AgentContext> {
   const memory = buildMemory(config);
 
   const registry = new ToolRegistry();
-  registry.registerMany([...timeTools(), ...fileTools(), ...memoryTools(), ...webTools(), ...speechTools(), ...computerTools()]);
+  registry.registerMany([...timeTools(), ...fileTools(), ...memoryTools(), ...webTools(), ...speechTools(), ...computerTools(), ...moltbookTools()]);
 
   const { tools: externalTools, errors: externalErrors } = await loadExternalMcpTools(config.mcp.servers);
   registry.registerMany(externalTools);
