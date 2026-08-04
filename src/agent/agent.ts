@@ -1,4 +1,5 @@
 import type { JarvGenieConfig } from '../config/index.js';
+import { loadSoul, composeSystemPrompt } from '../config/soul.js';
 import type { ModelRouter } from '../providers/index.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ChatMessage, MemoryService, ToolContext } from './types.js';
@@ -43,7 +44,7 @@ export class Agent {
 
   private async loop(input: string, sessionId: string | undefined, onDelta: ((delta: string) => void) | null): Promise<AgentResult> {
     const config = this.opts.config;
-    const system: ChatMessage = { role: 'system', content: config.agent.systemPrompt };
+    const system: ChatMessage = { role: 'system', content: composeSystemPrompt(config.agent.systemPrompt, loadSoul(config.agent.soulPath)) };
     const history = sessionId ? await this.opts.memory.sessionLoad(sessionId) : [];
     const messages: ChatMessage[] = [system, ...history, { role: 'user', content: input }];
     const firstNewIndex = history.length + 1;

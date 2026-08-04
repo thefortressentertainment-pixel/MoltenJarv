@@ -28,6 +28,7 @@ export interface JarvGenieConfig {
     systemPrompt: string;
     maxSteps: number;
     workdir: string;
+    soulPath?: string;
   };
   memory: {
     dir: string;
@@ -70,6 +71,7 @@ export function defaultConfig(): JarvGenieConfig {
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       maxSteps: 8,
       workdir: envOr('JARV_GENIE_WORKDIR', path.join(dataHome(), 'workspace')),
+      soulPath: path.join(dataHome(), 'soul'),
     },
     memory: {
       dir: envOr('JARV_GENIE_MEMORY_DIR', path.join(dataHome(), 'memory')),

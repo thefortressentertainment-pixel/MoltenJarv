@@ -103,6 +103,10 @@ sub-second, private. Shipped (`jarv-genie voice`):
 
 ## v5 — Learning
 
+- [x] Soul — persistent persona (Soul Spec v0.5) injected into the system
+      prompt on every run from `~/.jarv-genie/soul/` (single choke point in
+      `Agent.loop`), so identity and guardrails survive context compaction and
+      model swaps. See [docs/soul-spec.md](docs/soul-spec.md)
 - Improve the local configuration from usage traces (OpenJarvis-style
   local-first spec search: frontier model proposes edits at "search" time, the
   optimized local spec runs at "inference" time)

@@ -420,6 +420,21 @@ point `baseUrl` at it and pick a model. API keys are read from the secrets file
 (see *Manage API keys securely*), environment variables, or a config value —
 secrets are never written to the config file.
 
+## Soul — persistent identity
+
+Jarv Genie ships with a persistent persona file (Soul Spec v0.5) at
+`~/.jarv-genie/soul/`. The `SOUL.md` body is injected into the system prompt on
+every run, so the persona survives across sessions, model swaps, and context
+compaction — it is the moral anchor for everything the agent does.
+
+```bash
+$EDITOR ~/.jarv-genie/soul/SOUL.md   # edits apply on the next message
+```
+
+- `agent.soulPath` in `~/.jarv-genie/config.json` points at the soul directory.
+- Missing or invalid souls are ignored — the base system prompt still applies.
+- See [docs/soul-spec.md](docs/soul-spec.md) for the format and wiring.
+
 ## Data & privacy
 
 - Memory, sessions, and the file-tool workspace live under `~/.jarv-genie/`.
