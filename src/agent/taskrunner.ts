@@ -58,6 +58,7 @@ NEVER open, activate, or draw into apps (open_app, ui_activate, open_alarms, dra
 When using code_search, search for SPECIFIC identifiers (function or class names like composeSystemPrompt) rather than vague words — vague terms match documentation and miss the source.
 To control an app (play music, open an app, send a message, adjust volume), use app_command — ONE call per action. Do not use UI clicking, keystrokes, or run_shell for this.
 Setting or changing the volume must NEVER change music playback — do not play, pause, or toggle unless the user explicitly asked to. For an exact volume use app_command system volumeSet with value (0-100).
+When a request needs several actions, call the tools TOGETHER in one response so they share a single approval — do not dribble them out one at a time.
 To check the test suite or typecheck status, use self_review (returns a summary in one call) rather than running raw npm test.
 Never call remember, recall, or list_facts unless the user explicitly asked you to save, retrieve, or review a memory — do not invent memories.
 You can take several tool steps in sequence; after each result you decide the next one, until you have enough to answer.
@@ -172,7 +173,7 @@ Be honest: only ever claim an action succeeded if its tool result says it did.`;
       });
     }
 
-    return { text: text || "I couldn't complete that within my step budget. Please try again.", steps, toolCalls, provider, model };
+    return { text: text || "I hit my step limit while working through this — several steps likely waited on approvals or the task was long. Some actions may already be done. Tell me to continue or repeat the last part and I'll pick it up.", steps, toolCalls, provider, model };
   }
 
   /** Same iterative loop, streaming only the final answer's text deltas. */
@@ -234,6 +235,6 @@ Be honest: only ever claim an action succeeded if its tool result says it did.`;
       });
     }
 
-    return { text: text || "I couldn't complete that within my step budget. Please try again.", steps, toolCalls, provider, model };
+    return { text: text || "I hit my step limit while working through this — several steps likely waited on approvals or the task was long. Some actions may already be done. Tell me to continue or repeat the last part and I'll pick it up.", steps, toolCalls, provider, model };
   }
 }
