@@ -263,12 +263,14 @@ async function streamChat(res: http.ServerResponse, req: http.IncomingMessage, c
 
 async function status(ctx: AgentContext): Promise<Record<string, unknown>> {
   const facts = await ctx.memory.listFacts();
+  const computer = (ctx.config as unknown as { computer?: { allowControl?: boolean } }).computer;
   return {
     version: VERSION,
     model: ctx.router.primaryModel,
     providers: ctx.router.providers.map((p) => p.label),
     tools: ctx.tools.list().map((t) => t.name),
     facts: facts.length,
+    allowControl: computer?.allowControl === true,
     externalErrors: ctx.externalErrors,
   };
 }
