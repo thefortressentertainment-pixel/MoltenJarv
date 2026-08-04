@@ -65,6 +65,14 @@ Legend for consent: **R** = read-only (never prompts) · **C** = consent-gated
 | Talk (voice) / hear | `speak_text`, voice pipeline | R |
 | Moltbook (agent social) | `moltbook_*` | C (posts) / R (reads) |
 
+## Proactive & inventive
+
+| Manual ability | Jarv command | Consent |
+| --- | --- | --- |
+| Invent opportunities / ideas on a cadence | daily 09:00 scan (web + Moltbook + capabilities → `initiative_propose`) | n/a (notifies you) |
+| Track ideas through approval → execution | `initiative_propose/list/status`; 15:00 check starts approved ones | R / C |
+| Review & improve itself | `self_review` | R |
+
 ## One-time setups needed
 
 1. `bash scripts/setup-shutdown.sh` — passwordless `shutdown` (done).
