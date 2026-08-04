@@ -23,6 +23,7 @@ import { uiTools } from '../tools/ui.js';
 import { drawTools } from '../tools/draw.js';
 import { telegramTools } from '../tools/telegram.js';
 import { selfReviewTools } from '../tools/selfreview.js';
+import { shutdownTools } from '../tools/shutdown.js';
 import { statusTools } from '../tools/status.js';
 import { cameraTools } from '../tools/camera.js';
 import { calendarTools } from '../tools/calendar.js';
@@ -45,7 +46,7 @@ export async function buildAgent(): Promise<AgentContext> {
   const memory = buildMemory(config);
 
   const registry = new ToolRegistry();
-  registry.registerMany([...timeTools(), ...fileTools(), ...memoryTools(), ...webTools(), ...speechTools(), ...computerTools(), ...moltbookTools(), ...emailTools(), ...reminderTools(), ...schedulerTools(), ...systemTools(), ...uiTools(), ...drawTools(), ...telegramTools(), ...statusTools(), ...cameraTools(), ...calendarTools(), ...briefingTools(), ...selfReviewTools()]);
+  registry.registerMany([...timeTools(), ...fileTools(), ...memoryTools(), ...webTools(), ...speechTools(), ...computerTools(), ...moltbookTools(), ...emailTools(), ...reminderTools(), ...schedulerTools(), ...systemTools(), ...uiTools(), ...drawTools(), ...telegramTools(), ...statusTools(), ...cameraTools(), ...calendarTools(), ...briefingTools(), ...selfReviewTools(), ...shutdownTools()]);
 
   const { tools: externalTools, errors: externalErrors } = await loadExternalMcpTools(config.mcp.servers);
   registry.registerMany(externalTools);

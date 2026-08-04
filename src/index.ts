@@ -218,6 +218,14 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (raw[0] === 'shutdown') {
+    const { powerDown } = await import('./cli/shutdown.js');
+    const res = await powerDown('cli');
+    process.stdout.write(`${res.message}\n`);
+    if (!res.ok) process.exit(1);
+    return;
+  }
+
   if (raw[0] === 'perms') {
     await runPerms();
     return;
