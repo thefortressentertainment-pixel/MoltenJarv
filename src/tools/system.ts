@@ -17,6 +17,17 @@ import { recordShutdownRequest } from '../cli/shutdown.js';
 const execFileAsync = promisify(execFile);
 const OUTPUT_LIMIT = 8000;
 
+/** Credential/state files Jarv must never read or write directly. */
+const SENSITIVE_NAMES = new Set(['secrets.json', 'auth.json', 'link.json']);
+
+function isSensitivePath(p: string): boolean {
+  return SENSITIVE_NAMES.has(path.basename(p));
+}
+
+function sensitiveError(p: string): { ok: false; error: string } {
+  return { ok: false, error: `refusing to touch credential file "${p}" — keep secrets in the secret store (jarv-genie key set)` };
+}
+
 function clip(s: string): string {
   return s.length > OUTPUT_LIMIT ? s.slice(0, OUTPUT_LIMIT) + '\n… (truncated)' : s;
 }
@@ -71,6 +82,7 @@ export function systemTools(): ToolDefinition[] {
       handler: async (args) => {
         const p = path.resolve(String(args.path ?? '').trim());
         if (!p) return { ok: false, error: 'file_read_any requires a path' };
+        if (isSensitivePath(p)) return sensitiveError(p);
         const buf = await fs.readFile(p);
         return { path: p, size: buf.length, text: buf.toString('utf8').slice(0, 1_000_000) };
       },
@@ -91,6 +103,7 @@ export function systemTools(): ToolDefinition[] {
       handler: async (args) => {
         const p = path.resolve(String(args.path ?? '').trim());
         if (!p) return { ok: false, error: 'file_write_any requires a path' };
+        if (isSensitivePath(p)) return sensitiveError(p);
         await fs.mkdir(path.dirname(p), { recursive: true });
         await fs.writeFile(p, String(args.content ?? ''));
         return { ok: true, path: p, written: Buffer.byteLength(String(args.content ?? '')) };
@@ -125,6 +138,7 @@ export function systemTools(): ToolDefinition[] {
       handler: async (args) => {
         const p = path.resolve(String(args.path ?? '').trim());
         if (!p) return { ok: false, error: 'file_delete_any requires a path' };
+        if (isSensitivePath(p)) return sensitiveError(p);
         await fs.rm(p, { recursive: true });
         return { ok: true, deleted: p };
       },
@@ -145,6 +159,7 @@ export function systemTools(): ToolDefinition[] {
         const from = path.resolve(String(args.from ?? '').trim());
         const to = path.resolve(String(args.to ?? '').trim());
         if (!from || !to) return { ok: false, error: 'file_move_any requires from and to' };
+        if (isSensitivePath(from) || isSensitivePath(to)) return sensitiveError(from);
         await fs.mkdir(path.dirname(to), { recursive: true });
         await fs.rename(from, to);
         return { ok: true, from, to };
@@ -166,6 +181,7 @@ export function systemTools(): ToolDefinition[] {
         const from = path.resolve(String(args.from ?? '').trim());
         const to = path.resolve(String(args.to ?? '').trim());
         if (!from || !to) return { ok: false, error: 'file_copy_any requires from and to' };
+        if (isSensitivePath(from) || isSensitivePath(to)) return sensitiveError(from);
         await fs.mkdir(path.dirname(to), { recursive: true });
         await fs.cp(from, to, { recursive: true });
         return { ok: true, from, to };

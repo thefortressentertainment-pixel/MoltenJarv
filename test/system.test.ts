@@ -102,3 +102,24 @@ test('file_move_any and file_copy_any work', async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('file tools refuse to read/write credential files', async () => {
+  const { dir } = tmp();
+  try {
+    const secrets = path.join(dir, 'secrets.json');
+    writeFileSync(secrets, '{"KEY":"supersecret"}');
+    const read = systemTools().find((t) => t.name === 'file_read_any')!;
+    const write = systemTools().find((t) => t.name === 'file_write_any')!;
+    const del = systemTools().find((t) => t.name === 'file_delete_any')!;
+    const r = (await read.handler({ path: secrets }, {} as ToolContext)) as { ok: boolean; error?: string };
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error ?? '', /credential file/);
+    const w = (await write.handler({ path: secrets, content: '{}' }, {} as ToolContext)) as { ok: boolean; error?: string };
+    assert.strictEqual(w.ok, false);
+    const d = (await del.handler({ path: secrets }, {} as ToolContext)) as { ok: boolean; error?: string };
+    assert.strictEqual(d.ok, false);
+    assert.ok(writeFileSync, 'still importable');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
