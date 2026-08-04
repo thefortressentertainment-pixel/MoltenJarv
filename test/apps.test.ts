@@ -41,3 +41,28 @@ test('app_status refuses unknown apps', async () => {
   assert.strictEqual(res.ok, false);
   assert.match(res.error ?? '', /no recipe for app/);
 });
+
+test('app_status "system" reports wifi/bluetooth/volume read-only', async () => {
+  const status = appsTools().find((t) => t.name === 'app_status')!;
+  const res = (await status.handler({ app: 'system' }, ctx)) as { ok: boolean; system?: { wifi: string; bluetooth: string; volume: string } };
+  assert.strictEqual(res.ok, true);
+  assert.ok(res.system);
+  assert.ok(['on', 'off'].includes(res.system!.wifi));
+  assert.ok(['on', 'off'].includes(res.system!.bluetooth));
+  assert.match(res.system!.volume, /%\s*$/);
+});
+
+test('app_command system knows wifi/bluetooth/dnd/emptyTrash actions (validates without executing)', async () => {
+  const cmd = appsTools().find((t) => t.name === 'app_command')!;
+  const old = process.env.JARV_GENIE_NO_OPEN;
+  process.env.JARV_GENIE_NO_OPEN = '1';
+  try {
+    for (const action of ['wifiOn', 'wifiOff', 'bluetoothOn', 'bluetoothOff', 'dndOn', 'emptyTrash']) {
+      const res = (await cmd.handler({ app: 'system', action }, ctx)) as { ok: boolean; error?: string };
+      assert.strictEqual(res.ok, true, `${action} must be a valid system action`);
+    }
+  } finally {
+    if (old === undefined) delete process.env.JARV_GENIE_NO_OPEN;
+    else process.env.JARV_GENIE_NO_OPEN = old;
+  }
+});

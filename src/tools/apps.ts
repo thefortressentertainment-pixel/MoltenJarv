@@ -129,7 +129,16 @@ const SYSTEM_ACTIONS: Record<string, Builder> = {
   mute: () => 'set volume output muted true',
   unmute: () => 'set volume output muted false',
   clipboardSet: (p) => `set the clipboard to "${esc(String(p.text ?? ''))}"`,
+  wifiOn: () => 'do shell script "sudo -n /usr/sbin/networksetup -setairportpower en0 on"',
+  wifiOff: () => 'do shell script "sudo -n /usr/sbin/networksetup -setairportpower en0 off"',
+  bluetoothOn: () => 'do shell script "sudo -n /opt/homebrew/bin/blueutil -p 1"',
+  bluetoothOff: () => 'do shell script "sudo -n /opt/homebrew/bin/blueutil -p 0"',
+  dndOn: () => 'do shell script "defaults -currentHost write com.apple.notificationcenterui doNotDisturb -boolean true && killall NotificationCenter"',
+  dndOff: () => 'do shell script "defaults -currentHost write com.apple.notificationcenterui doNotDisturb -boolean false && killall NotificationCenter"',
+  emptyTrash: () => 'do shell script "find ~/.Trash -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null"',
 };
+
+const SYSTEM_ACTIONS_LIST = Object.keys(SYSTEM_ACTIONS).join(', ');
 
 function findRecipe(app: string): { key: string; recipe: Recipe } | null {
   const q = app.trim().toLowerCase();
@@ -137,6 +146,12 @@ function findRecipe(app: string): { key: string; recipe: Recipe } | null {
     if (key === q || recipe.aliases.includes(q)) return { key, recipe };
   }
   return null;
+}
+
+/** Tests set JARV_GENIE_NO_OPEN=1 so the suite never executes real app/system actions. */
+async function runOrSkip(script: string): Promise<void> {
+  if (process.env.JARV_GENIE_NO_OPEN === '1') return;
+  await runAppleScript(script);
 }
 
 const ALL_APPS = Object.keys(APP_RECIPES).join(', ');
@@ -148,7 +163,7 @@ export function appsTools(): ToolDefinition[] {
       description:
         `Drive an app or the system with one curated command — the manual actions a person would take. Apps: ${ALL_APPS}. Every app supports open and quit. ` +
         'Spotify/Music: play (uri), playPause, next, prev. Notes: newNote. Messages: send. Safari/Chrome: openUrl, newTab, back, forward. Calendar: addEvent (title, date). ' +
-        'System: sleep, lock, displaySleep, volumeSet (value 0-100), volumeUp/Down, mute, unmute, brightnessUp/Down, clipboardSet. ' +
+        `System: sleep, lock, displaySleep, volumeSet (value 0-100), volumeUp/Down, mute, unmute, brightnessUp/Down, clipboardSet, wifiOn/wifiOff, bluetoothOn/bluetoothOff, dndOn/dndOff, emptyTrash. ` +
         'One call does the whole action — no UI clicking. Setting volume never changes playback. REQUIRES consent.',
       inputSchema: {
         type: 'object',
@@ -175,7 +190,7 @@ export function appsTools(): ToolDefinition[] {
           const builder = SYSTEM_ACTIONS[action];
           if (!builder) return { ok: false, error: `no system action "${action}" — supported: ${Object.keys(SYSTEM_ACTIONS).join(', ')}` };
           try {
-            await runAppleScript(builder(args));
+            await runOrSkip(builder(args));
             return { ok: true, app: 'system', action };
           } catch (err) {
             return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -188,7 +203,7 @@ export function appsTools(): ToolDefinition[] {
 
         if (action === 'open') {
           try {
-            await runAppleScript(`tell application "${esc(recipe.app)}" to activate`);
+            await runOrSkip(`tell application "${esc(recipe.app)}" to activate`);
             return { ok: true, app: found.key, action };
           } catch (err) {
             return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -196,7 +211,7 @@ export function appsTools(): ToolDefinition[] {
         }
         if (action === 'quit') {
           try {
-            await runAppleScript(`tell application "${esc(recipe.app)}" to quit`);
+            await runOrSkip(`tell application "${esc(recipe.app)}" to quit`);
             return { ok: true, app: found.key, action };
           } catch (err) {
             return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -210,7 +225,7 @@ export function appsTools(): ToolDefinition[] {
           };
         }
         try {
-          await runAppleScript(builder(args));
+          await runOrSkip(builder(args));
           return { ok: true, app: found.key, action };
         } catch (err) {
           return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -220,15 +235,33 @@ export function appsTools(): ToolDefinition[] {
     {
       name: 'app_status',
       description:
-        'Read-only status of an app: whether it is running, and player state/track for Spotify or Music. Never prompts for consent.',
+        'Read-only status. For an app: running + player state/track (Spotify/Music). For system: Wi-Fi on/off, Bluetooth on/off, and volume. Never prompts for consent.',
       inputSchema: {
         type: 'object',
-        properties: { app: { type: 'string', description: 'App name, e.g. spotify, music.' } },
+        properties: { app: { type: 'string', description: 'App name (e.g. spotify, music) or "system".' } },
         required: ['app'],
       },
       handler: async (args) => {
-        const found = findRecipe(String(args.app ?? ''));
-        if (!found) return { ok: false, error: `no recipe for app "${args.app}"` };
+        const app = String(args.app ?? '').trim().toLowerCase();
+        if (app === 'system' || app === 'mac') {
+          try {
+            const wifi = await execFileAsync('/usr/sbin/networksetup', ['-getairportpower', 'en0']).then((r) => r.stdout.trim()).catch(() => 'unknown');
+            const bt = await execFileAsync('/opt/homebrew/bin/blueutil', ['-p']).then((r) => r.stdout.trim()).catch(() => 'unknown');
+            const vol = await runAppleScript('output volume of (get volume settings)');
+            return {
+              ok: true,
+              system: {
+                wifi: wifi.includes('On') ? 'on' : wifi.includes('Off') ? 'off' : wifi,
+                bluetooth: bt === '1' ? 'on' : bt === '0' ? 'off' : bt,
+                volume: `${vol.trim()}%`,
+              },
+            };
+          } catch (err) {
+            return { ok: false, error: err instanceof Error ? err.message : String(err) };
+          }
+        }
+        const found = findRecipe(app);
+        if (!found) return { ok: false, error: `no recipe for app "${app}"` };
         const { recipe } = found;
         try {
           const pid = await execFileAsync('pgrep', ['-x', recipe.app]).catch(() => ({ stdout: '' }));
