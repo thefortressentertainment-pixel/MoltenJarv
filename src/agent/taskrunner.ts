@@ -141,11 +141,18 @@ Rules:
   private async report(input: string, results: Array<Record<string, unknown>>): Promise<{ text: string; provider: string; model: string }> {
     const system =
       'You are reporting what was just executed on the user\'s machine. Summarize concisely and naturally what happened and the outcome. If a step failed, was denied, or did nothing, say so honestly — never claim something succeeded that did not.';
-    const res = await this.ask([
+    const messages: ChatMessage[] = [
       { role: 'system', content: system },
       { role: 'user', content: `Request: ${input}\n\nTool results:\n${JSON.stringify(results, null, 2)}` },
-    ]);
-    return { text: res.content ?? '(no response)', provider: res.provider, model: res.model };
+    ];
+    let res = await this.ask(messages);
+    for (let attempt = 0; attempt < 2 && !(res.content ?? '').trim(); attempt++) {
+      messages.push({ role: 'system', content: 'Your report was empty. Give the user a short, honest summary of the results.' });
+      res = await this.ask(messages);
+    }
+    const text = (res.content ?? '').trim();
+    if (text) return { text, provider: res.provider, model: res.model };
+    return { text: `Done. Results:\n${JSON.stringify(results, null, 2)}`, provider: res.provider, model: res.model };
   }
 
   async run(input: string): Promise<TaskResult> {
