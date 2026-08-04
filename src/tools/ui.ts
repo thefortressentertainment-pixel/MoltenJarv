@@ -96,9 +96,32 @@ export function uiTools(): ToolDefinition[] {
       },
     },
     {
+      name: 'ui_quit',
+      description:
+        'Quit (close) an app on the Mac by name, e.g. ui_quit(app: "Spotify"). Reliable way to close apps; use this instead of clicking close buttons.',
+      inputSchema: {
+        type: 'object',
+        properties: { app: { type: 'string', description: 'Application name to quit.' } },
+        required: ['app'],
+      },
+      consequential: true,
+      handler: async (args: Record<string, unknown>, ctx: ToolContext) => {
+        const gate = requireControl(ctx);
+        if (!gate.ok) return gate;
+        const app = String(args.app ?? '').trim();
+        if (!app) return { ok: false, error: 'app is required' };
+        try {
+          await runAppleScript(`tell application "${escapeLiteral(app)}" to quit`);
+          return { ok: true, quit: app };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    },
+    {
       name: 'ui_click',
       description:
-        'Click a button in the front window of an app on the Mac. The app must be activated first. Example: button "Alarms" in Clock.',
+        'Click a button in the front window of an app on the Mac. The app must be activated first. Example: button "Alarms" in Clock. Returns an error if the button does not exist.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -118,12 +141,12 @@ export function uiTools(): ToolDefinition[] {
           await runAppleScript(
             `tell application "${escapeLiteral(app)}" to activate\n` +
               `tell application "System Events" to tell process "${escapeLiteral(app)}"\n` +
-              `  try\n    click button "${escapeLiteral(button)}" of window 1\n  end try\n` +
+              `  click button "${escapeLiteral(button)}" of window 1\n` +
               `end tell`,
           );
           return { ok: true, app, clicked: button };
         } catch (err) {
-          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+          return { ok: false, error: `could not click button "${button}" in ${app}: ${err instanceof Error ? err.message : String(err)}` };
         }
       },
     },

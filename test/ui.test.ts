@@ -6,14 +6,14 @@ import type { ToolContext } from '../src/agent/types.js';
 const ctx = { config: { computer: { allowControl: true } }, memory: {}, workdir: '/tmp' } as unknown as ToolContext;
 const noControl = { config: {}, memory: {}, workdir: '/tmp' } as unknown as ToolContext;
 
-test('UI tools are all marked consequential for the consent gate', () => {
-  const names = uiTools().map((t) => t.name);
-  assert.ok(names.includes('ui_activate'));
-  assert.ok(names.includes('ui_click'));
-  assert.ok(names.includes('ui_type'));
-  assert.ok(names.includes('ui_key'));
-  assert.ok(names.includes('ui_get_windows'));
-  for (const t of uiTools()) assert.strictEqual(t.consequential, true, `${t.name} should be consequential`);
+test('mutating UI tools are consequential; the read-only one is not', () => {
+  const consequential = new Set(uiTools().filter((t) => t.consequential).map((t) => t.name));
+  assert.ok(consequential.has('ui_activate'));
+  assert.ok(consequential.has('ui_click'));
+  assert.ok(consequential.has('ui_type'));
+  assert.ok(consequential.has('ui_key'));
+  assert.ok(consequential.has('ui_quit'));
+  assert.ok(!consequential.has('ui_get_windows'), 'listing windows is read-only');
 });
 
 test('UI tools are gated behind allowControl', async () => {
