@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { getSecretStore } from '../config/secrets.js';
 import { setApprovalHandler } from '../approvals.js';
 import { TelegramClient, type TgUpdate } from '../telegram/client.js';
@@ -8,11 +9,13 @@ import { SESSION } from './index.js';
  * Telegram bridge: run `jarv-genie telegram`. Polls the bot for messages from
  * the authorized user, runs them through the agent, and replies. Consequential
  * tool calls are gated: the agent pauses and sends an approval request to
- * Telegram, waiting for an explicit yes/no before acting.
+ * Telegram, waiting for an explicit yes/no before acting. While the bridge is
+ * up it keeps the Mac awake (caffeinate) so Jarv is always reachable.
  *
- * Setup:
- *   jarv-genie key set TELEGRAM_BOT_TOKEN <bot-token-from-BotFather>
- *   jarv-genie key set TELEGRAM_CHAT_ID <your-chat-id>
+ * Setup (only the token is required):
+ *   jarv-genie key set TELEGRAM_BOT_TOKEN <token from @BotFather>
+ *   jarv-genie telegram
+ * Then just message your bot: the first sender is claimed as the owner.
  */
 
 const APPROVAL_RE = /^(yes|y|approve|approved|ok|okay|go ahead|sure|confirm)\b/i;
@@ -26,30 +29,54 @@ function verdict(text: string): boolean | null {
 
 function usage(): string {
   return (
-    'Telegram bridge needs two secrets:\n' +
-    '  jarv-genie key set TELEGRAM_BOT_TOKEN <token from @BotFather>\n' +
-    '  jarv-genie key set TELEGRAM_CHAT_ID <your chat id>\n' +
-    'Then run: jarv-genie telegram'
+    'Telegram bridge needs a bot token:\n' +
+    '  1. In Telegram, message @BotFather and send /newbot\n' +
+    '  2. Pick a name and username; it replies with a token\n' +
+    '  3. Store it:\n' +
+    '       jarv-genie key set TELEGRAM_BOT_TOKEN <token>\n' +
+    '  4. Run: jarv-genie telegram\n' +
+    'Then message your bot — the first sender becomes the owner.'
   );
+}
+
+/** Keep the Mac awake while the bridge runs (prevent idle + system sleep). */
+function keepAwake(): void {
+  if (process.platform !== 'darwin') return;
+  try {
+    const child = spawn('caffeinate', ['-i', '-s', '-w', String(process.pid)], {
+      stdio: 'ignore',
+      detached: true,
+    });
+    child.unref();
+    process.stdout.write('[jarv-genie] keeping the Mac awake (caffeinate) while the bridge runs\n');
+  } catch {
+    // caffeinate may be unavailable; not fatal
+  }
 }
 
 export async function runTelegram(backend: ChatBackend): Promise<void> {
   const secrets = getSecretStore();
   const token = secrets.get('TELEGRAM_BOT_TOKEN');
-  const chatId = secrets.get('TELEGRAM_CHAT_ID');
-  if (!token || !chatId) {
+  if (!token) {
     process.stdout.write(usage() + '\n');
     return;
   }
 
+  let chatId = secrets.get('TELEGRAM_CHAT_ID');
+  keepAwake();
+
   const client = new TelegramClient(token);
   const me = await client.getMe();
   process.stdout.write(`[jarv-genie] telegram online as @${me.username ?? me.id}\n`);
+  if (!chatId) {
+    process.stdout.write('[jarv-genie] no chat id set — message your bot to claim ownership\n');
+  }
 
   let offset = 0;
   let pendingResolve: ((ok: boolean) => void) | null = null;
 
   setApprovalHandler((question: string) => {
+    if (!chatId) return Promise.resolve(false);
     return client
       .sendMessage(chatId, `🔒 Jarv wants approval for:\n\n${question}\n\nReply **yes** to allow, **no** to deny.`)
       .then(() => new Promise<boolean>((resolve) => (pendingResolve = resolve)));
@@ -62,9 +89,9 @@ export async function runTelegram(backend: ChatBackend): Promise<void> {
   const processMessage = async (text: string): Promise<void> => {
     try {
       const result = await backend.chat(text);
-      await client.sendMessage(chatId, result.text || '(no response)');
+      await client.sendMessage(chatId!, result.text || '(no response)');
     } catch (err) {
-      await client.sendMessage(chatId, `⚠️ ${err instanceof Error ? err.message : String(err)}`);
+      await client.sendMessage(chatId!, `⚠️ ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -73,8 +100,15 @@ export async function runTelegram(backend: ChatBackend): Promise<void> {
     const text = u.message?.text;
     if (from === undefined) return;
     if (String(from) !== String(chatId)) {
-      await client.sendMessage(from, 'not authorized');
-      return;
+      if (!chatId) {
+        chatId = String(from);
+        secrets.set('TELEGRAM_CHAT_ID', chatId);
+        process.stdout.write(`[jarv-genie] claimed owner chat id ${chatId}\n`);
+        await client.sendMessage(from, '✅ You are now the owner of this bot. Jarv Genie is online — tell me what you need.');
+      } else {
+        await client.sendMessage(from, 'not authorized');
+        return;
+      }
     }
     if (!text) return;
     if (pendingResolve) {
@@ -85,7 +119,7 @@ export async function runTelegram(backend: ChatBackend): Promise<void> {
       return;
     }
     if (text === '/start' || text === '/help') {
-      await client.sendMessage(chatId, 'Jarv Genie is here. Tell me what you need.');
+      await client.sendMessage(chatId!, 'Jarv Genie is here. Tell me what you need.');
       return;
     }
     chain = chain.then(() => processMessage(text));
