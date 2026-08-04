@@ -384,7 +384,7 @@ async function main(): Promise<void> {
       const host = opts.host ?? '127.0.0.1';
       process.stdout.write(`loopback:  http://${host}:${port}\n`);
       for (const ip of hubIps()) process.stdout.write(`network:   http://${ip}:${port}\n`);
-      if (opts.auth) process.stdout.write(`token:     ${getTokenStore().get()}\n`);
+      process.stdout.write(`token:     ${getTokenStore().get()}\n`);
       return;
     }
     const ctx = await buildAgent();

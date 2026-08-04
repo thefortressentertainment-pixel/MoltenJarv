@@ -108,18 +108,31 @@ Because the hub is just the same Jarv Genie agent, all tools, memory, and the
 MCP server still work — they now answer to every paired device.
 
 **Test from your phone** — the hub's chat UI is a normal web page, so a phone on
-your Tailscale network can use it in a browser. Print the reachable URLs and
-open the Tailscale one (it works from anywhere, even when the Hub Mac is on a
-different Wi-Fi):
+your Tailscale network can use it in a browser. Install the services once so the
+hub runs always-on (bound to `0.0.0.0`, token-auth on `/api/*`, auto-restart):
 
 ```bash
-jarv-genie hub --url            # local + network/Tailscale addresses
+bash scripts/install-services.sh
 ```
 
-Then on your phone: open `http://100.x.y.z:3001` in the browser. If the hub was
-started with remote auth on, attach `?token=...` or pair using
-`jarv-genie link http://<hub-ip>:3001 <token>` from any client and use
-`jarv-genie --remote`.
+Print the reachable URLs and the token, then open the Tailscale URL on your
+phone (it works from anywhere, even when the Hub Mac is on a different Wi-Fi):
+
+```bash
+jarv-genie hub --url      # loopback + network/Tailscale addresses + token
+```
+
+On your phone:
+1. Install the **Tailscale** app and sign in to the same account so it's on your
+   tailnet (the phone shows up in `tailscale status`).
+2. Open `http://100.x.y.z:3001` in the browser.
+3. When the page asks, paste the token from `jarv-genie hub --token` (the UI
+   remembers it in `localStorage`).
+
+The Hub Mac doesn't need to be awake-reachable from the LAN for this to work —
+Tailscale keeps the connection private across networks. To use the hub from a
+terminal on any machine: `jarv-genie link http://100.x.y.z:3001 <token>` then
+`jarv-genie --remote "…"`.
 
 ### Hub security
 
