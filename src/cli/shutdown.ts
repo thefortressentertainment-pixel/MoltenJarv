@@ -5,11 +5,16 @@ import { promisify } from 'node:util';
 import { dataHome } from '../config/defaults.js';
 
 /**
- * Reliable macOS shutdown. Logs the intent first (so Jarv can verify on the
- * next boot), then tries, in order:
- *   1. `sudo -n /sbin/shutdown -h now` — force-halts, no app-blocking dialogs.
- *      Requires a one-time sudoers entry (scripts/setup-shutdown.sh).
- *   2. `osascript ... System Events to shut down` — graceful, may wait on apps.
+ * Reliable macOS shutdown with post-boot verification.
+ *
+ * 1. Record the intent (durable, before anything else).
+ * 2. Try a force-halt via `sudo -n /sbin/shutdown -h now` (no app-blocking
+ *    dialogs). Requires a one-time sudoers entry (scripts/setup-shutdown.sh).
+ * 3. Fall back to a graceful System Events shutdown.
+ *
+ * Because the machine powers off mid-call, the caller cannot "confirm" success
+ * synchronously — so on the next boot `verifyLastShutdown()` cross-checks the
+ * recorded request against the actual boot time to prove the Mac really went off.
  */
 
 const execFileAsync = promisify(execFile);
@@ -35,14 +40,63 @@ export function readShutdownLog(): string {
   }
 }
 
+/** Parse the ISO timestamp of the most recent shutdown request, if any. */
+export function lastShutdownRequest(): Date | null {
+  try {
+    const lines = fs.readFileSync(shutdownLogPath(), 'utf8').split('\n').filter(Boolean);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i] ?? '';
+      const t = new Date(line.split(' ')[0] ?? '');
+      if (!Number.isNaN(t.getTime())) return t;
+    }
+  } catch {
+    /* no log */
+  }
+  return null;
+}
+
+/** Current boot time from `sysctl kern.boottime`. */
+export async function bootTime(): Promise<Date | null> {
+  try {
+    const res = await execFileAsync('sysctl', ['kern.boottime']);
+    const m = /sec\s*=\s*(\d+)/.exec(res.stdout);
+    const sec = Number(m?.[1]);
+    if (!Number.isNaN(sec) && sec > 0) return new Date(sec * 1000);
+  } catch {
+    /* sysctl unavailable */
+  }
+  return null;
+}
+
+/**
+ * Verify the most recent shutdown actually happened: if the current boot time
+ * is AFTER the last recorded shutdown request, the Mac really powered off
+ * (and back on). Returns a plain-language result.
+ */
+export async function verifyLastShutdown(): Promise<string> {
+  const requested = lastShutdownRequest();
+  const boot = await bootTime();
+  if (!requested) return 'no shutdown has been recorded yet — nothing to verify';
+  if (!boot) return `last shutdown requested ${requested.toISOString()}, but boot time could not be read`;
+  if (boot.getTime() > requested.getTime()) {
+    return `verified: shutdown was requested ${requested.toISOString()}, and the Mac powered off and booted back up at ${boot.toISOString()}`;
+  }
+  return `NOT verified: shutdown was requested ${requested.toISOString()}, but the Mac did not power off (booted ${boot.toISOString()}, before the request)`;
+}
+
 export async function powerDown(source: string): Promise<{ ok: boolean; method: string; message: string }> {
   const line = recordShutdownRequest(source);
 
-  // 1) Force-halt via passwordless sudo (reliable; does not wait on apps).
+  // 1) Force-halt via passwordless sudo. When the system halts the child is
+  //    killed, which surfaces as a `killed` error — that means it is working.
   try {
     await execFileAsync('sudo', ['-n', '/sbin/shutdown', '-h', 'now'], { timeout: 8000 });
     return { ok: true, method: 'sudo shutdown', message: `shutdown initiated via sudo at ${line.trim()}` };
-  } catch {
+  } catch (err) {
+    const e = err as { killed?: boolean; signal?: string };
+    if (e?.killed === true || e?.signal) {
+      return { ok: true, method: 'sudo shutdown', message: `system halting via sudo at ${line.trim()}` };
+    }
     // no passwordless sudo — fall through
   }
 
