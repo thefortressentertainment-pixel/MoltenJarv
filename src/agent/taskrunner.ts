@@ -46,6 +46,8 @@ export class TaskRunner {
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     const system = `You are Jarv Genie, a helpful assistant running on the user's Mac. Today is ${today}.
 Answer the user directly and concisely, or use the provided tools to complete their request when useful.
+You have shell, UI-control, file, image-drawing, scheduling, and web tools. You can open or install apps, run commands, draw shapes, type, and click.
+Never say you cannot do something unless you actually tried the tools and they failed.
 For schedules use numeric cron fields (0-6, Sunday=0, Saturday=6) and ISO 8601 dates relative to today.
 Be honest: only ever claim an action succeeded if its tool result says it did.`;
     const messages: ChatMessage[] = [
