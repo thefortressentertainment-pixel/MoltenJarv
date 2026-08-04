@@ -24,6 +24,7 @@ export function schedulerTools(): ToolDefinition[] {
         },
         required: ['cron', 'prompt'],
       },
+      consequential: true,
       handler: async (args: Record<string, unknown>) => {
         const cron = String(args.cron ?? '').trim();
         const prompt = String(args.prompt ?? '').trim();
@@ -65,6 +66,7 @@ export function schedulerTools(): ToolDefinition[] {
         },
         required: ['id'],
       },
+      consequential: true,
       handler: async (args: Record<string, unknown>) => {
         const id = String(args.id ?? '').trim();
         if (!id) return { ok: false, error: 'schedule_remove requires id' };

@@ -1,5 +1,6 @@
 import type { JarvGenieConfig } from '../config/index.js';
 import { loadSoul, composeSystemPrompt } from '../config/soul.js';
+import { approvalActive, requireApproval } from '../approvals.js';
 import type { ModelRouter } from '../providers/index.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ChatMessage, MemoryService, ToolContext } from './types.js';
@@ -92,6 +93,20 @@ export class Agent {
             }),
           });
           continue;
+        }
+        const def = this.opts.tools.list().find((t) => t.name === call.name);
+        if (def?.consequential && approvalActive()) {
+          const desc = `${call.name}${JSON.stringify(call.arguments ?? {})}`;
+          const approved = await requireApproval(desc);
+          if (!approved) {
+            messages.push({
+              role: 'tool',
+              toolCallId: call.id,
+              name: call.name,
+              content: JSON.stringify({ error: 'the user denied this action — do not perform it' }),
+            });
+            continue;
+          }
         }
         const { ok, result } = await this.opts.tools.execute(call.name, call.arguments, ctx);
         messages.push({

@@ -134,6 +134,24 @@ Tailscale keeps the connection private across networks. To use the hub from a
 terminal on any machine: `jarv-genie link http://100.x.y.z:3001 <token>` then
 `jarv-genie --remote "…"`.
 
+### Telegram — talk to Jarv anywhere, with explicit consent
+
+Run the Telegram bridge so Jarv is reachable from your phone's Telegram app, no
+matter where you are. Consequential actions (opening apps, AppleScript control,
+creating/deleting reminders, scheduling, sending email, posting to Moltbook) are
+**gated**: Jarv pauses, sends you an approval request over Telegram, and only
+acts after you reply **yes**. No channel = gate open (you're at the machine).
+
+```bash
+jarv-genie key set TELEGRAM_BOT_TOKEN <token-from-@BotFather>
+jarv-genie key set TELEGRAM_CHAT_ID <your-chat-id>
+jarv-genie telegram        # or install it: bash scripts/install-services.sh
+```
+
+Get a token from [@BotFather](https://t.me/BotFather) in Telegram; your chat id
+is visible via the bot once you message it. Only the configured chat id is
+authorized to talk to Jarv.
+
 ### Hub security
 
 - When the hub is bound beyond loopback, `/api/*` routes require

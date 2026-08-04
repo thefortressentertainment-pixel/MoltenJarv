@@ -21,6 +21,7 @@ export function emailTools(): ToolDefinition[] {
         },
         required: ['to', 'subject', 'text'],
       },
+      consequential: true,
       handler: async (args) => {
         const to = String(args.to ?? '').trim();
         const subject = String(args.subject ?? '').trim();

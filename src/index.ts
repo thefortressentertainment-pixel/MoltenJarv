@@ -13,6 +13,7 @@ import { localBackend, remoteBackend } from './cli/backend.js';
 import { runKeyCommand } from './cli/keys.js';
 import { runUpdateCommand } from './cli/update.js';
 import { runSidecar, sendNotify } from './cli/sidecar.js';
+import { runTelegram } from './cli/telegram.js';
 import { addMonitor, printMonitors, removeMonitor, runMonitorDaemon } from './cli/monitor.js';
 import { runVoiceSession, runWakeSession, type VoiceSessionOptions } from './cli/voice.js';
 import { installPiper } from './voice/index.js';
@@ -45,6 +46,7 @@ Usage:
   jarv-genie unlink               forget the hub
   jarv-genie sidecar [--name X] [--speak] [--no-notify] [--remote]   connect a device to the hub
   jarv-genie notify "text" [--device NAME] [--speak] [--remote]   push to connected devices
+  jarv-genie telegram    run the Telegram bridge (talk to Jarv + approve consequential actions remotely)
   jarv-genie monitor [add <dir|web|metric> <target> "<prompt>" [--every N] [--notify] [--speak] | list | remove <id>]   long-horizon watches
   jarv-genie monitor    run the monitor daemon (fires when a watched target changes)
   jarv-genie update publish <file> [--version X] [--notes "..."]   stage a build for distribution
@@ -205,6 +207,12 @@ async function main(): Promise<void> {
 
   if (raw[0] === 'update') {
     await runUpdateCommand(raw.slice(1));
+    return;
+  }
+
+  if (raw[0] === 'telegram') {
+    const ctx = await buildAgent();
+    await runTelegram(localBackend(ctx));
     return;
   }
 

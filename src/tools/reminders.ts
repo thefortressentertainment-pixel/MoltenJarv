@@ -67,6 +67,7 @@ export function reminderTools(): ToolDefinition[] {
         },
         required: ['name'],
       },
+      consequential: true,
       handler: async (args: Record<string, unknown>, ctx: ToolContext) => {
         const gate = requireControl(ctx);
         if (!gate.ok) return gate;
@@ -97,6 +98,7 @@ export function reminderTools(): ToolDefinition[] {
           list: { type: 'string', description: 'Reminders list (default "Reminders").' },
         },
       },
+      consequential: true,
       handler: async (args: Record<string, unknown>, ctx: ToolContext) => {
         const gate = requireControl(ctx);
         if (!gate.ok) return gate;
@@ -125,6 +127,7 @@ export function reminderTools(): ToolDefinition[] {
         },
         required: ['name'],
       },
+      consequential: true,
       handler: async (args: Record<string, unknown>, ctx: ToolContext) => {
         const gate = requireControl(ctx);
         if (!gate.ok) return gate;

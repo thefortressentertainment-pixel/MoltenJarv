@@ -32,6 +32,8 @@ export interface ToolDefinition {
     required?: string[];
   };
   handler: (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
+  /** When true, the agent must get explicit human consent before executing (when a consent channel is active). */
+  consequential?: boolean;
 }
 
 export interface ToolContext {

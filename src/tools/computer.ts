@@ -41,6 +41,7 @@ export function computerTools(): ToolDefinition[] {
         },
         required: ['app'],
       },
+      consequential: true,
       handler: async (args: Record<string, unknown>) => {
         const app = String(args.app ?? '').trim();
         if (!app) return { ok: false, error: 'app is required' };
@@ -63,6 +64,7 @@ export function computerTools(): ToolDefinition[] {
         },
         required: ['script'],
       },
+      consequential: true,
       handler: async (args: Record<string, unknown>, ctx: ToolContext) => {
         const config = ctx.config as JarvGenieConfig;
         if (!controlAllowed(config)) {
