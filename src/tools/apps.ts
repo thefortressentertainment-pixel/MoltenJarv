@@ -98,6 +98,10 @@ const RECIPES: Record<string, Recipe> = {
     aliases: ['system', 'mac'],
     actions: {
       sleep: () => 'tell application "System Events" to sleep',
+      volumeSet: (p) => {
+        const v = Math.min(100, Math.max(0, Math.round(Number(p.value ?? 0) || 0)));
+        return `set volume output volume ${v}`;
+      },
       volumeUp: () => 'set volume output volume ((output volume of (get volume settings)) + 10)',
       volumeDown: () => 'set volume output volume ((output volume of (get volume settings)) - 10)',
       mute: () => 'set volume output muted true',
@@ -119,7 +123,7 @@ export function appsTools(): ToolDefinition[] {
     {
       name: 'app_command',
       description:
-        'Drive an app or the system with one curated command. Apps: spotify, music, notes, messages, safari, chrome, calendar, calculator, clock, preview, system. Actions: open, play (spotify/music), playPause, next, prev, playPlaylist (music), newNote (notes), send (messages), openUrl (safari/chrome), sleep/volumeUp/volumeDown/mute/unmute (system). One call does the whole action — no UI clicking. REQUIRES consent.',
+        'Drive an app or the system with one curated command. Apps: spotify, music, notes, messages, safari, chrome, calendar, calculator, clock, preview, system. Actions: open, play (spotify/music), playPause, next, prev, playPlaylist (music), newNote (notes), send (messages), openUrl (safari/chrome), sleep/volumeSet(value 0-100)/volumeUp/volumeDown/mute/unmute (system). One call does the whole action — no UI clicking. Setting volume never changes playback. REQUIRES consent.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -130,6 +134,7 @@ export function appsTools(): ToolDefinition[] {
           text: { type: 'string', description: 'Note body (notes newNote) or message text (messages send).' },
           contact: { type: 'string', description: 'Buddy for messages send.' },
           url: { type: 'string', description: 'URL for safari/chrome openUrl.' },
+          value: { type: 'number', description: 'Volume level 0-100 for system volumeSet.' },
         },
         required: ['app', 'action'],
       },
