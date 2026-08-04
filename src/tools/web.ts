@@ -29,7 +29,39 @@ export function webTools(): ToolDefinition[] {
         return duckDuckGoSearch(query, maxResults);
       },
     },
+    {
+      name: 'web_read',
+      description:
+        'Fetch a URL and return its content as clean, readable text (via Jina Reader, no API key). Use to read a specific page, article, or result found with web_search.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'The http(s) URL to read.' },
+          max_chars: { type: 'number', description: 'Max characters to return (default 8000).' },
+        },
+        required: ['url'],
+      },
+      handler: async (args) => {
+        const url = String(args.url ?? '').trim();
+        if (!url) throw new Error('web_read requires a url');
+        if (!/^https?:\/\//i.test(url)) throw new Error('web_read requires an http(s) URL');
+        const maxChars = typeof args.max_chars === 'number' ? Math.max(500, Math.min(50_000, Math.floor(args.max_chars))) : 8000;
+        return readPage(url, maxChars);
+      },
+    },
   ];
+}
+
+export async function readPage(target: string, maxChars = 8000): Promise<{ url: string; content: string; truncated: boolean }> {
+  const jinaUrl = 'https://r.jina.ai/' + target;
+  const res = await fetch(jinaUrl, {
+    headers: { 'User-Agent': USER_AGENT },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) throw new Error(`Read failed: HTTP ${res.status}`);
+  const text = (await res.text()).trim();
+  if (text.length <= maxChars) return { url: target, content: text, truncated: false };
+  return { url: target, content: text.slice(0, maxChars), truncated: true };
 }
 
 async function duckDuckGoSearch(query: string, maxResults: number): Promise<WebResult[]> {
