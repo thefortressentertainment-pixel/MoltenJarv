@@ -54,6 +54,29 @@ export function computerTools(): ToolDefinition[] {
       },
     },
     {
+      name: 'open_alarms',
+      description:
+        'Open the macOS Clock app to the Alarms tab on the hub machine. Use when the user asks to see or open their alarms.',
+      inputSchema: { type: 'object', properties: {} },
+      consequential: true,
+      handler: async () => {
+        try {
+          await openApp('Clock');
+          // Best-effort: click the Alarms tab (requires Accessibility permission).
+          try {
+            await runAppleScript(
+              'tell application "System Events"\n  tell process "Clock"\n    try\n      click button "Alarms" of toolbar 1 of window 1\n    end try\n  end tell\nend tell',
+            );
+          } catch {
+            // tab click is optional
+          }
+          return { ok: true, opened: 'Clock — Alarms' };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    },
+    {
       name: 'run_apple_script',
       description:
         'Run an AppleScript on the hub machine (System Events, apps, shortcuts). Requires computer.allowControl in config and macOS Accessibility permission.',
