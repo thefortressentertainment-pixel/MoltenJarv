@@ -80,7 +80,19 @@ export class Agent {
       toolCalls += chat.toolCalls.length;
       const ctx: ToolContext = { memory: this.opts.memory, config, workdir: config.agent.workdir };
 
+      const toolNames = this.opts.tools.list().map((t) => t.name);
       for (const call of chat.toolCalls) {
+        if (!toolNames.includes(call.name)) {
+          messages.push({
+            role: 'tool',
+            toolCallId: call.id,
+            name: call.name,
+            content: JSON.stringify({
+              error: `Unknown tool "${call.name}". Available tools: ${toolNames.join(', ')}. Choose one of these.`,
+            }),
+          });
+          continue;
+        }
         const { ok, result } = await this.opts.tools.execute(call.name, call.arguments, ctx);
         messages.push({
           role: 'tool',

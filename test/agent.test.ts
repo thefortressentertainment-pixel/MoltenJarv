@@ -103,3 +103,45 @@ test('run (non-streaming) still works after the streaming refactor', async () =>
     t.cleanup();
   }
 });
+
+test('hallucinated tool names are corrected with the available tool list', async () => {
+  let calls = 0;
+  const router = {
+    streamChat: async (opts: { messages: ChatMessage[] }) => {
+      calls++;
+      if (calls === 1) {
+        return {
+          content: null,
+          toolCalls: [{ id: '1', name: 'update_knowledge_base', arguments: { scale: 'full' } }],
+          provider: 'fake',
+          model: 'fake-model',
+        };
+      }
+      return { content: 'recovered', toolCalls: null, provider: 'fake', model: 'fake-model' };
+    },
+    chat: async (opts: { messages: ChatMessage[] }) => {
+      calls++;
+      if (calls === 1) {
+        return {
+          content: null,
+          toolCalls: [{ id: '1', name: 'update_knowledge_base', arguments: { scale: 'full' } }],
+          provider: 'fake',
+          model: 'fake-model',
+        };
+      }
+      return { content: 'recovered', toolCalls: null, provider: 'fake', model: 'fake-model' };
+    },
+  };
+  const t = build({ router: router as never });
+  try {
+    const result = await t.agent.run('hi', 's');
+    assert.strictEqual(result.text, 'recovered');
+    assert.strictEqual(calls, 2, 'model recovered on the next step');
+    const toolMsg = t.appended[0]?.find((m) => m.role === 'tool');
+    assert.ok(toolMsg, 'tool result was persisted');
+    assert.match(toolMsg.content ?? '', /Unknown tool .*update_knowledge_base/);
+    assert.match(toolMsg.content ?? '', /get_datetime/, 'error lists an available tool');
+  } finally {
+    t.cleanup();
+  }
+});
