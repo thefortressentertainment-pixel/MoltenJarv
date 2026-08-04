@@ -1,7 +1,7 @@
 import type { ModelRouter } from '../providers/index.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { JarvGenieConfig } from '../config/index.js';
-import type { ChatMessage, MemoryService, ToolCall, ToolContext } from './types.js';
+import type { ChatMessage, MemoryService, ToolCall, ToolContext, ToolDefinition } from './types.js';
 import { approvalActive, requireApproval } from '../approvals.js';
 import { extractTextToolCalls } from './agent.js';
 
@@ -36,6 +36,19 @@ export interface TaskResult {
 export class TaskRunner {
   constructor(private opts: TaskRunnerOptions) {}
 
+  /**
+   * Expose tools to the model. Memory tools (remember/recall/list_facts) are
+   * hidden unless the user's message is actually about memory — the model
+   * otherwise invents memories and calls them on every task.
+   */
+  private usableTools(input: string): ToolDefinition[] {
+    const all = this.opts.tools.list();
+    if (/\b(remember|recall|memor(y|ies)|facts|what do you (know|remember)|do you remember)\b/i.test(input)) {
+      return all;
+    }
+    return all.filter((t) => !['remember', 'recall', 'list_facts'].includes(t.name));
+  }
+
   private systemPrompt(): string {
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     return `You are Jarv Genie, a helpful assistant running on the user's Mac. Today is ${today}.
@@ -51,11 +64,16 @@ For schedules use numeric cron fields (0-6, Sunday=0, Saturday=6) and ISO 8601 d
 Be honest: only ever claim an action succeeded if its tool result says it did.`;
   }
 
-  private async execute(calls: ToolCall[]): Promise<Array<Record<string, unknown>>> {
+  private async execute(calls: ToolCall[], allowed: Set<string>): Promise<Array<Record<string, unknown>>> {
     const ctx: ToolContext = { memory: this.opts.memory, config: this.opts.config, workdir: this.opts.config.agent.workdir };
     const tools = this.opts.tools.list();
     const results: Array<Record<string, unknown>> = [];
     for (const call of calls) {
+      // Hard block: never run a tool that wasn't exposed for this task.
+      if (!allowed.has(call.name)) {
+        results.push({ tool: call.name, error: `not available for this task (only exposed tools may run)` });
+        continue;
+      }
       const def = tools.find((t) => t.name === call.name);
       if (!def) {
         results.push({ tool: call.name, error: `unknown tool` });
@@ -89,7 +107,8 @@ Be honest: only ever claim an action succeeded if its tool result says it did.`;
       { role: 'user', content: input },
     ];
     const maxSteps = Math.max(1, this.opts.config.agent?.maxSteps ?? 8);
-    const toolNames = this.opts.tools.list().map((t) => t.name);
+    const usable = this.usableTools(input);
+    const toolNames = usable.map((t) => t.name);
     let steps = 0;
     let toolCalls = 0;
     let provider = 'primary';
@@ -99,7 +118,7 @@ Be honest: only ever claim an action succeeded if its tool result says it did.`;
 
     while (steps < maxSteps) {
       steps++;
-      const chat = await this.opts.router.chat({ messages, tools: this.opts.tools.list() });
+      const chat = await this.opts.router.chat({ messages, tools: usable });
       provider = chat.provider;
       model = chat.model;
       messages.push({ role: 'assistant', content: chat.content, toolCalls: chat.toolCalls ?? undefined });
@@ -110,7 +129,7 @@ Be honest: only ever claim an action succeeded if its tool result says it did.`;
         if (extracted.length > 0) {
           toolCalls += extracted.length;
           const calls: ToolCall[] = extracted.map((e, i) => ({ id: `text-${i}`, name: e.name, arguments: e.args }));
-          const results = await this.execute(calls);
+          const results = await this.execute(calls, new Set(toolNames));
           results.forEach((r, i) => messages.push({ role: 'tool', toolCallId: calls[i]?.id ?? '', name: calls[i]?.name ?? '', content: JSON.stringify(r) }));
           continue;
         }
@@ -128,7 +147,7 @@ Be honest: only ever claim an action succeeded if its tool result says it did.`;
       }
 
       toolCalls += chat.toolCalls.length;
-      const results = await this.execute(chat.toolCalls);
+      const results = await this.execute(chat.toolCalls, new Set(toolNames));
       chat.toolCalls.forEach((call, i) => {
         messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: JSON.stringify(results[i] ?? {}) });
       });
@@ -144,7 +163,8 @@ Be honest: only ever claim an action succeeded if its tool result says it did.`;
       { role: 'user', content: input },
     ];
     const maxSteps = Math.max(1, this.opts.config.agent?.maxSteps ?? 8);
-    const toolNames = this.opts.tools.list().map((t) => t.name);
+    const usable = this.usableTools(input);
+    const toolNames = usable.map((t) => t.name);
     let steps = 0;
     let toolCalls = 0;
     let provider = 'primary';
@@ -156,7 +176,7 @@ Be honest: only ever claim an action succeeded if its tool result says it did.`;
       steps++;
       const buffered: string[] = [];
       const chat = await this.opts.router.streamChat(
-        { messages, tools: this.opts.tools.list() },
+        { messages, tools: usable },
         (d) => buffered.push(d),
       );
       provider = chat.provider;
@@ -169,7 +189,7 @@ Be honest: only ever claim an action succeeded if its tool result says it did.`;
         if (extracted.length > 0) {
           toolCalls += extracted.length;
           const calls: ToolCall[] = extracted.map((e, i) => ({ id: `text-${i}`, name: e.name, arguments: e.args }));
-          const results = await this.execute(calls);
+          const results = await this.execute(calls, new Set(toolNames));
           results.forEach((r, i) => messages.push({ role: 'tool', toolCallId: calls[i]?.id ?? '', name: calls[i]?.name ?? '', content: JSON.stringify(r) }));
           continue;
         }
@@ -189,7 +209,7 @@ Be honest: only ever claim an action succeeded if its tool result says it did.`;
       }
 
       toolCalls += chat.toolCalls.length;
-      const results = await this.execute(chat.toolCalls);
+      const results = await this.execute(chat.toolCalls, new Set(toolNames));
       chat.toolCalls.forEach((call, i) => {
         messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: JSON.stringify(results[i] ?? {}) });
       });

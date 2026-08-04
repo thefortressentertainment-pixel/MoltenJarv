@@ -1,3 +1,4 @@
+<!-- Top-of-file comment reviewed by Jarv Genie on 2026-08-04 (user requested this edit). -->
 <!-- Top-of-file comment added by Jarv Genie on 2026-08-04. -->
 <!-- NOTE: This file is managed by Jarv Genie. Optimization items are tracked here and reviewed via self_review. -->
 

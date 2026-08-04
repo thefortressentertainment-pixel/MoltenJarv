@@ -29,7 +29,10 @@ export class ToolRegistry {
   async execute(name: string, args: Record<string, unknown>, ctx: ToolContext): Promise<ExecutionResult> {
     if (process.env.JARV_GENIE_DEBUG_TOOLS) {
       try {
-        fs.appendFileSync('/tmp/jarv-toollog.txt', `${new Date().toISOString()} ${name} ${JSON.stringify(args)}\n`);
+        fs.appendFileSync(
+          '/tmp/jarv-toollog.txt',
+          `${new Date().toISOString()} pid=${process.pid} argv=${process.argv.slice(1).join(' ').slice(0, 60)} ${name} ${JSON.stringify(args)}\n`,
+        );
       } catch {
         /* best effort */
       }
