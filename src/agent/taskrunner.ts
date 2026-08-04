@@ -1,15 +1,16 @@
 import type { ModelRouter } from '../providers/index.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { JarvGenieConfig } from '../config/index.js';
-import type { ChatMessage, MemoryService, ToolContext } from './types.js';
+import type { ChatMessage, MemoryService, ToolCall, ToolContext, ToolDefinition } from './types.js';
 import { approvalActive, requireApproval } from '../approvals.js';
+import { extractTextToolCalls } from './agent.js';
 
 /**
  * Plan → execute → report task runner. Unlike the conversational Agent, this
  * never mixes the user's chat history into the working context:
  *
- *   1. PLAN: ask the model (clean context, tool catalog as text) for a JSON
- *      plan — either tool calls or a plain answer.
+ *   1. PLAN: ask the model (clean context, real tools exposed for native
+ *      function calling) what it wants to do — a set of tool calls or an answer.
  *   2. EXECUTE: run each planned tool for real, with the consent gate applied
  *      to consequential tools.
  *   3. REPORT: ask the model to summarize the actual results honestly.
@@ -33,80 +34,45 @@ export interface TaskResult {
   model: string;
 }
 
-interface Plan {
-  action: 'tools' | 'answer';
-  text?: string;
-  calls?: Array<{ name: string; arguments: Record<string, unknown> }>;
-}
-
-function extractJson(text: string): unknown {
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start === -1 || end === -1 || end <= start) return null;
-  try {
-    return JSON.parse(text.slice(start, end + 1));
-  } catch {
-    return null;
-  }
-}
-
 export class TaskRunner {
   constructor(private opts: TaskRunnerOptions) {}
 
-  private async ask(messages: ChatMessage[]): Promise<{ content: string | null; provider: string; model: string }> {
-    const chat = await this.opts.router.chat({ messages, tools: [] });
-    return { content: chat.content, provider: chat.provider, model: chat.model };
+  private async ask(messages: ChatMessage[], tools: ToolDefinition[]): Promise<{ content: string | null; toolCalls: ToolCall[] | null; provider: string; model: string }> {
+    const chat = await this.opts.router.chat({ messages, tools });
+    return { content: chat.content, toolCalls: chat.toolCalls ?? null, provider: chat.provider, model: chat.model };
   }
 
-  private toolCatalog(): string {
-    return this.opts.tools
-      .list()
-      .map((t) => {
-        const required = (t.inputSchema.required ?? []).join(', ');
-        return `${t.name}${required ? ` (requires: ${required})` : ''} — ${t.description}`;
-      })
-      .join('\n');
-  }
-
-  private async plan(input: string): Promise<{ plan: Plan; provider: string; model: string }> {
+  private async plan(input: string): Promise<{ calls: ToolCall[] | null; answer: string; provider: string; model: string }> {
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-    const system = `You convert a user request into concrete tool calls. Today is ${today}.
-
-Available tools:
-${this.toolCatalog()}
-
-Return ONLY a JSON object (no markdown fences, no prose) with one of these shapes:
-1) To call tools: {"action":"tools","calls":[{"name":"<tool>","arguments":{...}}]}
-2) To reply without tools: {"action":"answer","text":"<your reply>"}
-
-Rules:
-- Never invent tool names; use only the tools listed above.
-- For schedules/reminders use numeric cron fields (0-6, Sunday=0, Saturday=6) and ISO 8601 dates relative to today.
-- Only include arguments the tool actually requires or accepts.`;
-
+    const system = `You are Jarv Genie, a helpful assistant running on the user's Mac. Today is ${today}.
+Answer the user directly and concisely, or use the provided tools to complete their request when useful.
+For schedules use numeric cron fields (0-6, Sunday=0, Saturday=6) and ISO 8601 dates relative to today.
+Be honest: only ever claim an action succeeded if its tool result says it did.`;
     const messages: ChatMessage[] = [
       { role: 'system', content: system },
       { role: 'user', content: input },
     ];
+    const toolNames = this.opts.tools.list().map((t) => t.name);
 
-    let res = await this.ask(messages);
     for (let attempt = 0; attempt < 2; attempt++) {
-      const parsed = extractJson(res.content ?? '');
-      if (parsed && typeof parsed === 'object') {
-        const p = parsed as Plan;
-        if (p.action === 'answer' || p.action === 'tools') {
-          const validNames = new Set(this.opts.tools.list().map((t) => t.name));
-          const calls = (p.calls ?? []).filter((c) => c && typeof c.name === 'string' && validNames.has(c.name));
-          return { plan: { action: p.action, text: p.text, calls }, provider: res.provider, model: res.model };
-        }
+      const res = await this.ask(messages, this.opts.tools.list());
+      if (res.toolCalls && res.toolCalls.length > 0) {
+        return { calls: res.toolCalls, answer: '', provider: res.provider, model: res.model };
       }
-      messages.push({ role: 'system', content: 'That was not a valid JSON plan. Return ONLY a JSON object with an "action" key.' });
-      res = await this.ask(messages);
+      const content = (res.content ?? '').trim();
+      // Fallback: the model may have written a tool call as text.
+      const extracted = content ? extractTextToolCalls(content, toolNames) : [];
+      if (extracted.length > 0) {
+        const calls: ToolCall[] = extracted.map((e, i) => ({ id: `text-${i}`, name: e.name, arguments: e.args }));
+        return { calls, answer: '', provider: res.provider, model: res.model };
+      }
+      if (content) return { calls: null, answer: content, provider: res.provider, model: res.model };
+      messages.push({ role: 'system', content: 'Your response was empty. Answer the user or call a tool.' });
     }
-    return { plan: { action: 'answer', text: res.content ?? "I couldn't parse that request into a task." }, provider: res.provider, model: res.model };
+    return { calls: null, answer: "I couldn't produce a response. Please try again.", provider: 'primary', model: 'qwen2.5:3b' };
   }
 
-  private async execute(calls: Array<{ name: string; arguments: Record<string, unknown> }>): Promise<Array<Record<string, unknown>>> {
+  private async execute(calls: ToolCall[]): Promise<Array<Record<string, unknown>>> {
     const ctx: ToolContext = { memory: this.opts.memory, config: this.opts.config, workdir: this.opts.config.agent.workdir };
     const tools = this.opts.tools.list();
     const results: Array<Record<string, unknown>> = [];
@@ -145,10 +111,10 @@ Rules:
       { role: 'system', content: system },
       { role: 'user', content: `Request: ${input}\n\nTool results:\n${JSON.stringify(results, null, 2)}` },
     ];
-    let res = await this.ask(messages);
+    let res = await this.ask(messages, []);
     for (let attempt = 0; attempt < 2 && !(res.content ?? '').trim(); attempt++) {
       messages.push({ role: 'system', content: 'Your report was empty. Give the user a short, honest summary of the results.' });
-      res = await this.ask(messages);
+      res = await this.ask(messages, []);
     }
     const text = (res.content ?? '').trim();
     if (text) return { text, provider: res.provider, model: res.model };
@@ -156,14 +122,14 @@ Rules:
   }
 
   async run(input: string): Promise<TaskResult> {
-    const { plan, provider, model } = await this.plan(input);
+    const { calls, answer, provider, model } = await this.plan(input);
 
-    if (plan.action === 'answer' || !plan.calls || plan.calls.length === 0) {
-      return { text: plan.text ?? '(no response)', steps: 1, toolCalls: 0, provider, model };
+    if (!calls || calls.length === 0) {
+      return { text: answer || '(no response)', steps: 1, toolCalls: 0, provider, model };
     }
 
-    const results = await this.execute(plan.calls);
+    const results = await this.execute(calls);
     const reported = await this.report(input, results);
-    return { text: reported.text, steps: 2, toolCalls: plan.calls.length, provider: reported.provider, model: reported.model };
+    return { text: reported.text, steps: 2, toolCalls: calls.length, provider: reported.provider, model: reported.model };
   }
 }

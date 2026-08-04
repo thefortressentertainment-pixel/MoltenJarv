@@ -6,7 +6,7 @@ import type { ToolRegistry } from '../tools/registry.js';
 import type { ChatMessage, MemoryService, ToolCall, ToolContext } from './types.js';
 
 /** Parse tool invocations written as text, e.g. `schedule_add --cron "0 7 * * 6" --prompt "x"`. */
-function extractTextToolCalls(text: string, toolNames: string[]): Array<{ name: string; args: Record<string, unknown> }> {
+export function extractTextToolCalls(text: string, toolNames: string[]): Array<{ name: string; args: Record<string, unknown> }> {
   const out: Array<{ name: string; args: Record<string, unknown> }> = [];
   for (const name of toolNames) {
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
