@@ -83,7 +83,11 @@ export function recentContext(
     if (isToolRole(m)) {
       text = text.length > 120 ? text.slice(0, 120) + '…' : text;
     } else if (text.length > MAX_CONTENT_CHARS) {
-      text = text.slice(0, MAX_CONTENT_CHARS) + '…';
+      // Long turns usually carry the point at the END (a question Jarv just
+      // asked, the answer, the request). Keep both the head and the tail so
+      // the terse "yes"/"no" reply that follows is never contextless.
+      const keep = Math.floor(MAX_CONTENT_CHARS / 2);
+      text = text.slice(0, keep) + '…' + text.slice(-keep);
     }
     return `${label}: ${text}`;
   });
@@ -102,7 +106,8 @@ export function composeRecentContextBlock(
   if (!excerpt) return '';
   return (
     '\n\n# Recent context (last ~2 hours)\n' +
-    'Recall these recent turns if the user refers to "earlier", "before", or asks you to redo or continue something you just said. Treat this as authoritative context you should already know.\n\n' +
+    'Recall these recent turns if the user refers to "earlier", "before", or asks you to redo or continue something you just said. Treat this as authoritative context you should already know.\n' +
+    'A terse "yes", "no", "ok", or "sure" from the user is an answer to the question you asked most recently in this thread — act on it rather than asking for clarification.\n\n' +
     excerpt
   );
 }

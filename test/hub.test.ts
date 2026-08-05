@@ -168,6 +168,58 @@ test('ui loopback stays auth-free by default', async () => {
   }
 });
 
+test('hub exposes the initiative backlog and status updates', async () => {
+  const dir = tmpDir();
+  const oldHome = process.env.HOME;
+  process.env.HOME = dir;
+  try {
+    const { createInitiativeStore } = await import('../src/initiatives.js');
+    const store = createInitiativeStore();
+    const init = store.add({ idea: 'Automate the morning briefing', rationale: 'Saves time daily', value: 'high', effort: 'low' });
+
+    const tokenStore = new TokenStore(path.join(dir, 'auth.json'));
+    const { server, url } = await listenUi(fakeCtx(), { port: 0, open: false, auth: true, tokenStore });
+    try {
+      const headers = { Authorization: `Bearer ${tokenStore.get()}` };
+
+      const listRes = await fetch(url + '/api/initiatives', { headers });
+      assert.strictEqual(listRes.status, 200);
+      const list = (await listRes.json()) as { count: number; open: number; initiatives: Array<{ id: string; status: string }> };
+      assert.strictEqual(list.count, 1);
+      assert.strictEqual(list.open, 1);
+      assert.strictEqual(list.initiatives[0]!.status, 'proposed');
+
+      const setRes = await fetch(url + `/api/initiatives/${init.id}/status`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'approved' }),
+      });
+      assert.strictEqual(setRes.status, 200);
+      const updated = (await setRes.json()) as { initiative: { status: string } };
+      assert.strictEqual(updated.initiative.status, 'approved');
+
+      const badRes = await fetch(url + `/api/initiatives/${init.id}/status`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'maybe' }),
+      });
+      assert.strictEqual(badRes.status, 400);
+
+      const missingRes = await fetch(url + '/api/initiatives/init-nope/status', {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'approved' }),
+      });
+      assert.strictEqual(missingRes.status, 404);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  } finally {
+    process.env.HOME = oldHome ?? '';
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('voice speak endpoint returns a WAV when TTS is available', async (t) => {
   const { hasPiper, hasTts } = await import('../src/voice/index.js');
   if (!hasPiper() && !hasTts()) {

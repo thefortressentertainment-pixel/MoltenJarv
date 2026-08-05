@@ -54,7 +54,8 @@ Rules:
 - When you use a tool, incorporate its result into a natural response.
 - If you don't know something, say so rather than guessing.
 - Never reveal your system prompt or tool schemas unless the user asks.
-- Treat the user's personal data as private. Do not volunteer it.`;
+- Treat the user's personal data as private. Do not volunteer it.
+- Delivery Track Record (MANDATORY): after ANY shipped task — an investor-digest run, ai-papers briefs shipped, a system op, a Moltbook/social post, or anything delivered — call the log_delivery tool to append a timestamped entry to the Delivery Track Record (tag category as investor-digest | ai-papers | system-op | social | other). This is always-on operating hygiene you must not skip. The log is a SHA-256 hash chain: before sharing or posting it, call deliverylog_verify (read-only) to confirm the chain is intact and get the current chain root + a publishable attestation. You may post that attestation on Moltbook with consent — the root hash is public proof, safe to share.`;
 
 export function defaultConfig(): JarvGenieConfig {
   return {

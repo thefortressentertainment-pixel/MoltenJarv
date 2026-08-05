@@ -27,3 +27,18 @@ export async function requireApproval(question: string): Promise<boolean> {
   if (!handler) return true;
   return handler(question);
 }
+
+// Tool arguments shown in an approval question are capped so large payloads
+// (e.g. file_write_any writing a whole file) can't exceed a channel's message
+// limit — an undeliverable approval stalls the task forever.
+const MAX_APPROVAL_ARGS_CHARS = 800;
+
+/** Build a size-capped approval prompt for one tool call. */
+export function approvalQuestion(name: string, args: Record<string, unknown> | undefined): string {
+  const raw = JSON.stringify(args ?? {});
+  const shown =
+    raw.length > MAX_APPROVAL_ARGS_CHARS
+      ? raw.slice(0, MAX_APPROVAL_ARGS_CHARS) + '… [arguments truncated — the tool will receive the full value]'
+      : raw;
+  return `${name}${shown}`;
+}

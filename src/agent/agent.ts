@@ -1,6 +1,6 @@
 import type { JarvGenieConfig } from '../config/index.js';
 import { loadSoul, composeSystemPrompt } from '../config/soul.js';
-import { approvalActive, requireApproval } from '../approvals.js';
+import { approvalActive, requireApproval, approvalQuestion } from '../approvals.js';
 import type { ModelRouter } from '../providers/index.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ChatMessage, MemoryService, ToolCall, ToolContext } from './types.js';
@@ -35,6 +35,34 @@ export interface AgentResult {
 }
 
 export interface AgentStreamResult extends AgentResult {}
+
+/** Budget for the in-context session tail, in characters (~20k tokens). The
+ * recent-context block in the system prompt carries a compact excerpt of the
+ * wider thread, so the tail only needs the most recent turns. */
+const MAX_HISTORY_CHARS = 80_000;
+
+/**
+ * Bound the session history sent to the model. The session store appends every
+ * turn forever (this REPL's default session is megabytes), which would exceed
+ * any model's context window and fail the request. Keeps the newest turns up
+ * to the budget, then drops any dangling tool results whose assistant
+ * tool_calls were trimmed away so the OpenAI message chain stays valid.
+ */
+export function trimHistory(history: ChatMessage[]): ChatMessage[] {
+  const tail: ChatMessage[] = [];
+  let size = 0;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i];
+    if (!m) continue;
+    const cost = (m.content ?? '').length + 64;
+    if (tail.length > 0 && size + cost > MAX_HISTORY_CHARS) break;
+    tail.push(m);
+    size += cost;
+  }
+  tail.reverse();
+  const start = tail.findIndex((m) => m.role !== 'tool');
+  return start > 0 ? tail.slice(start) : tail;
+}
 
 /**
  * Tool-calling agent loop: assemble context, ask the model, execute any tool
@@ -76,8 +104,13 @@ export class Agent {
         composeSystemPrompt(config.agent.systemPrompt, loadSoul(config.agent.soulPath)) +
         composeRecentContextBlock(history),
     };
-    const messages: ChatMessage[] = [system, ...history, { role: 'user', content: input }];
-    const firstNewIndex = history.length + 1;
+    // The session store grows unbounded, so the raw history can exceed any
+    // model's context window (and break the request outright). Send a bounded
+    // tail of the most recent turns; the recent-context block above still
+    // carries a compact excerpt of the wider thread.
+    const trimmed = trimHistory(history);
+    const messages: ChatMessage[] = [system, ...trimmed, { role: 'user', content: input }];
+    const firstNewIndex = trimmed.length + 1;
 
     let steps = 0;
     let toolCalls = 0;
@@ -173,7 +206,7 @@ export class Agent {
     }
     const def = this.opts.tools.list().find((t) => t.name === call.name);
     if (def?.consequential && approvalActive()) {
-      const approved = await requireApproval(`${call.name}${JSON.stringify(call.arguments ?? {})}`);
+      const approved = await requireApproval(approvalQuestion(call.name, call.arguments));
       if (!approved) {
         messages.push({
           role: 'tool',

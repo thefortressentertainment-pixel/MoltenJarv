@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { SESSION, type AgentContext } from '../cli/index.js';
 import { TaskRunner } from '../agent/taskrunner.js';
+import { createInitiativeStore, type InitiativeStatus } from '../initiatives.js';
 import { VERSION } from '../config/defaults.js';
 import { getTokenStore, type TokenStore } from '../hub/auth.js';
 import { getLinkStore } from '../remote/client.js';
@@ -18,6 +19,7 @@ import { artifactPath, checkUpdateStatus, readManifest } from '../updates/index.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS = new Set(['index.html', 'app.css', 'app.js']);
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '::ffff:127.0.0.1']);
+const VALID_INITIATIVE_STATUSES: InitiativeStatus[] = ['proposed', 'approved', 'declined', 'in_progress', 'done'];
 
 export interface UiServerOptions {
   host?: string;
@@ -151,6 +153,25 @@ function handler(ctx: AgentContext, opts: UiServerOptions, host: string) {
 
       if (req.method === 'GET' && route === '/api/status') return json(res, 200, await status(ctx));
       if (req.method === 'GET' && route === '/api/session') return json(res, 200, await loadSession(ctx));
+
+      const initiativeMatch = route.match(/^\/api\/initiatives(?:\/([^/]+)\/status)?$/);
+      if (initiativeMatch && (route === '/api/initiatives' || initiativeMatch[1])) {
+        if (req.method === 'GET' && route === '/api/initiatives') {
+          const initiatives = createInitiativeStore();
+          const list = initiatives.list();
+          return json(res, 200, { count: list.length, open: initiatives.openCount(), initiatives: list });
+        }
+        if (req.method === 'POST' && initiativeMatch[1]) {
+          const body = await readJson(req);
+          const status = String(body.status ?? '').trim() as InitiativeStatus;
+          if (!VALID_INITIATIVE_STATUSES.includes(status)) {
+            return json(res, 400, { error: `invalid status (${VALID_INITIATIVE_STATUSES.join(', ')})` });
+          }
+          const updated = createInitiativeStore().setStatus(initiativeMatch[1], status);
+          if (!updated) return json(res, 404, { error: `no initiative with id "${initiativeMatch[1]}"` });
+          return json(res, 200, { initiative: updated });
+        }
+      }
 
       if (req.method === 'GET' && route === '/api/update') {
         const m = readManifest();

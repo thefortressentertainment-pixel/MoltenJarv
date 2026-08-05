@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { Agent } from '../src/agent/agent.js';
+import { trimHistory } from '../src/agent/agent.js';
 import type { ChatMessage } from '../src/agent/types.js';
 
 function fakeRouter() {
@@ -182,4 +183,30 @@ test('text-encoded tool calls are intercepted and executed for real', async () =
   const result = await agent.run('what time is it');
   assert.deepStrictEqual(executed, ['get_datetime'], 'text tool call executed for real');
   assert.strictEqual(result.text, 'The time tool ran.');
+});
+
+test('trimHistory keeps a bounded newest tail and drops dangling tool results', () => {
+  const big = 'x'.repeat(100_000);
+  const history: ChatMessage[] = [
+    { role: 'user', content: 'old 1' },
+    { role: 'assistant', content: 'old 2' },
+    { role: 'tool', toolCallId: 'c1', name: 'web_read', content: big },
+    { role: 'user', content: 'mid' },
+    { role: 'assistant', content: 'mid 2', toolCalls: [{ id: 'c2', name: 'get_datetime', arguments: {} }] },
+    { role: 'tool', toolCallId: 'c2', name: 'get_datetime', content: '{"now":"2026-08-01"}' },
+    { role: 'user', content: 'recent' },
+    { role: 'assistant', content: 'recent 2' },
+  ];
+
+  const trimmed = trimHistory(history);
+  assert.ok(trimmed.length < history.length, 'oversized history was trimmed');
+  const size = trimmed.reduce((n, m) => n + (m.content ?? '').length, 0);
+  assert.ok(size <= 80_000, 'trimmed history stays within budget');
+  assert.strictEqual(trimmed[trimmed.length - 1]?.content, 'recent 2', 'newest turn is kept');
+  assert.notStrictEqual(trimmed[0]?.role, 'tool', 'no dangling tool result at the cut');
+  assert.ok(trimmed.some((m) => m.content === 'recent'), 'recent turns are preserved');
+
+  // A small history passes through unchanged.
+  const small = [{ role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }];
+  assert.deepStrictEqual(trimHistory(small), small);
 });

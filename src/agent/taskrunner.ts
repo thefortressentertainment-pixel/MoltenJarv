@@ -2,7 +2,7 @@ import type { ModelRouter } from '../providers/index.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { JarvGenieConfig } from '../config/index.js';
 import type { ChatMessage, MemoryService, ToolCall, ToolContext, ToolDefinition } from './types.js';
-import { approvalActive, requireApproval } from '../approvals.js';
+import { approvalActive, requireApproval, approvalQuestion } from '../approvals.js';
 import { extractTextToolCalls } from './agent.js';
 import { composeRecentContextBlock } from './recentContext.js';
 
@@ -62,6 +62,8 @@ You have shell, UI-control, file, image-drawing, scheduling, web, and code tools
 NEVER open, activate, or draw into apps (open_app, ui_activate, open_alarms, draw_shape, camera_capture) unless the user explicitly asks you to open, view, or create an image on screen. Checks, searches, test runs, and reports never require opening apps — use screen_capture if you need to see the screen (it opens nothing).
 When using code_search, search for SPECIFIC identifiers (function or class names like composeSystemPrompt) rather than vague words — vague terms match documentation and miss the source.
 To control an app (play music, open an app, send a message, adjust volume), use app_command — ONE call per action. Do not use UI clicking, keystrokes, or run_shell for this.
+To toggle Wi-Fi or Bluetooth, use app_command system wifiOn/wifiOff/bluetoothOn/bluetoothOff — exactly one call. Never open System Settings or script the UI for these; they work directly.
+Turning Wi-Fi off cuts your own internet (your model and Telegram channel go offline), so: if the user asks to turn Wi-Fi off AND back on, use app_command system wifiRecycle (one call, one approval) instead of two separate calls. When you do turn Wi-Fi off, warn that it auto-restores after 10 minutes; if the user says "keep wifi off", run app_command system wifiNoAutoRestore first.
 Setting or changing the volume must NEVER change music playback — do not play, pause, or toggle unless the user explicitly asked to. For an exact volume use app_command system volumeSet with value (0-100).
 When a request needs several actions, call the tools TOGETHER in one response so they share a single approval — do not dribble them out one at a time.
 To check the test suite or typecheck status, use self_review (returns a summary in one call) rather than running raw npm test.
@@ -71,7 +73,8 @@ On Moltbook or any platform where other AIs can read or reply to you, keep your 
 You can take several tool steps in sequence; after each result you decide the next one, until you have enough to answer.
 Never say you cannot do something unless you actually tried the tools and they failed.
 For schedules use numeric cron fields (0-6, Sunday=0, Saturday=6) and ISO 8601 dates relative to today.
-Be honest: only ever claim an action succeeded if its tool result says it did.`;
+Be honest: only ever claim an action succeeded if its tool result says it did.
+Delivery Track Record (MANDATORY): after ANY shipped task — an investor-digest run, ai-papers briefs shipped, a system op, a Moltbook/social post, or anything delivered — call the log_delivery tool to append a timestamped entry to the Delivery Track Record (tag category as investor-digest | ai-papers | system-op | social | other). This is always-on operating hygiene you must not skip. The log is a SHA-256 hash chain: before sharing or posting it, call deliverylog_verify (read-only) to confirm the chain is intact and get the current chain root + a publishable attestation. You may post that attestation on Moltbook with consent — the root hash is public proof, safe to share.`;
   }
 
   private async execute(calls: ToolCall[], allowed: Set<string>): Promise<Array<Record<string, unknown>>> {
@@ -91,9 +94,9 @@ Be honest: only ever claim an action succeeded if its tool result says it did.`;
       const desc = calls
         .filter((c) => allowed.has(c.name))
         .filter((c) => tools.find((t) => t.name === c.name)?.consequential)
-        .map((c) => `${c.name}${JSON.stringify(c.arguments ?? {})}`)
+        .map((c) => approvalQuestion(c.name, c.arguments))
         .join('; ');
-      batchApproved = await requireApproval(desc);
+      batchApproved = await requireApproval(desc.length > 3500 ? desc.slice(0, 3500) + '…' : desc);
     }
 
     for (const call of calls) {

@@ -456,6 +456,8 @@ function bindPanel() {
       $('modelHint').textContent = `Failed: ${err.message}`;
     }
   });
+
+  $('initRefreshBtn').addEventListener('click', loadInitiatives);
 }
 
 function bindNew() {
@@ -530,6 +532,100 @@ async function loadDetails() {
     }
   } catch (err) {
     $('memoryLine').textContent = `Could not load details: ${err.message}`;
+  }
+
+  await loadInitiatives();
+}
+
+// ---------- initiative dashboard ----------
+const INITIATIVE_STATUSES = ['proposed', 'approved', 'declined', 'in_progress', 'done'];
+
+async function setInitiativeStatus(id, status, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    await api(`/api/initiatives/${encodeURIComponent(id)}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    });
+    await loadInitiatives();
+  } catch (err) {
+    if (btn) btn.disabled = false;
+    $('initiativeLine').textContent = `Could not update: ${err.message}`;
+  }
+}
+
+function initiativeActions(init) {
+  const actions = document.createElement('div');
+  actions.className = 'initiative-actions';
+  if (init.status === 'proposed') {
+    addAction(actions, init.id, 'Approve', 'approved', 'primary');
+    addAction(actions, init.id, 'Decline', 'declined');
+  } else if (init.status === 'approved' || init.status === 'in_progress') {
+    addAction(actions, init.id, 'Mark done', 'done');
+  } else if (init.status === 'declined' || init.status === 'done') {
+    addAction(actions, init.id, 'Reopen', 'proposed');
+  }
+  return actions;
+}
+
+function addAction(container, id, label, status, kind) {
+  const b = document.createElement('button');
+  b.className = `btn${kind ? ` ${kind}` : ''}`;
+  b.textContent = label;
+  b.addEventListener('click', () => setInitiativeStatus(id, status, b));
+  container.appendChild(b);
+}
+
+async function loadInitiatives() {
+  const container = $('initiativeList');
+  const line = $('initiativeLine');
+  try {
+    const data = await api('/api/initiatives');
+    const open = data.open || 0;
+    const total = data.count || 0;
+    line.textContent = `${open} open of ${total} total`;
+    container.innerHTML = '';
+
+    if (!data.initiatives || data.initiatives.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'initiative-empty';
+      empty.textContent = 'No initiatives yet. Ask Jarv to come up with one, or it scans daily at 9:00 and 15:00.';
+      container.appendChild(empty);
+      return;
+    }
+
+    for (const init of data.initiatives) {
+      const card = document.createElement('div');
+      card.className = 'initiative-card';
+      card.dataset.initiativeId = init.id;
+
+      const idea = document.createElement('div');
+      idea.className = 'initiative-idea';
+      idea.textContent = init.idea;
+
+      const rationale = document.createElement('div');
+      rationale.className = 'initiative-rationale';
+      rationale.textContent = init.rationale;
+
+      const meta = document.createElement('div');
+      meta.className = 'initiative-meta';
+      const badge = document.createElement('span');
+      badge.className = `badge ${init.status}`;
+      badge.textContent = init.status.replace('_', ' ');
+      const effort = document.createElement('span');
+      effort.className = 'initiative-effort';
+      effort.textContent = `${init.value} value · ${init.effort} effort`;
+      meta.appendChild(badge);
+      meta.appendChild(effort);
+
+      card.appendChild(idea);
+      card.appendChild(rationale);
+      card.appendChild(meta);
+      card.appendChild(initiativeActions(init));
+      container.appendChild(card);
+    }
+  } catch (err) {
+    line.textContent = `Could not load initiatives: ${err.message}`;
   }
 }
 

@@ -31,6 +31,7 @@ import { statusTools } from '../tools/status.js';
 import { cameraTools } from '../tools/camera.js';
 import { calendarTools } from '../tools/calendar.js';
 import { briefingTools } from '../tools/briefing.js';
+import { deliveryLogTools } from '../tools/deliverylog.js';
 
 const SESSION = 'default';
 
@@ -49,7 +50,7 @@ export async function buildAgent(): Promise<AgentContext> {
   const memory = buildMemory(config);
 
   const registry = new ToolRegistry();
-  registry.registerMany([...timeTools(), ...fileTools(), ...memoryTools(), ...webTools(), ...speechTools(), ...computerTools(), ...moltbookTools(), ...emailTools(), ...reminderTools(), ...schedulerTools(), ...systemTools(), ...uiTools(), ...drawTools(), ...telegramTools(), ...statusTools(), ...cameraTools(), ...calendarTools(), ...briefingTools(), ...selfReviewTools(), ...shutdownTools(), ...codeTools(), ...appsTools(), ...initiativeTools()]);
+  registry.registerMany([...timeTools(), ...fileTools(), ...memoryTools(), ...webTools(), ...speechTools(), ...computerTools(), ...moltbookTools(), ...emailTools(), ...reminderTools(), ...schedulerTools(), ...systemTools(), ...uiTools(), ...drawTools(), ...telegramTools(), ...statusTools(), ...cameraTools(), ...calendarTools(), ...briefingTools(), ...selfReviewTools(), ...shutdownTools(), ...codeTools(), ...appsTools(), ...initiativeTools(), ...deliveryLogTools()]);
 
   const { tools: externalTools, errors: externalErrors } = await loadExternalMcpTools(config.mcp.servers);
   registry.registerMany(externalTools);

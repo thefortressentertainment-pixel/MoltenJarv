@@ -20,6 +20,11 @@ import type { AgentContext } from './index.js';
 
 const APPROVAL_RE = /^(yes|y|approve|approved|ok|okay|go ahead|sure|confirm)\b/i;
 const DENY_RE = /^(no|n|deny|denied|cancel|don'?t|stop)\b/i;
+const AUTO_APPROVE_RE = /^(yes all|yes to all|allow all|approve all|y all|go ahead all)\b/i;
+// An approval the owner never answers must not hold the busy-lock (and starve
+// the scheduled agent) forever. Auto-deny after this window so the task
+// resolves and the lock is released. Shorter than the 30-min busy-lock TTL.
+const APPROVAL_TIMEOUT_MS = 15 * 60 * 1000;
 
 function verdict(text: string): boolean | null {
   if (APPROVAL_RE.test(text)) return true;
@@ -99,13 +104,34 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
 
   let offset = 0;
   let pendingResolve: ((ok: boolean) => void) | null = null;
+  // When the owner replies "yes all", approve every remaining consequential
+  // tool call for the current task without asking again. Reset per task.
+  let autoApprove = false;
 
   setApprovalHandler((question: string) => {
     if (!chatId) return Promise.resolve(false);
+    const ownerId = chatId;
+    if (autoApprove) return Promise.resolve(true);
     process.stdout.write(`[jarv-genie] telegram approval requested: ${question.slice(0, 120)}\n`);
-    return client
-      .sendMessage(chatId, `🔒 Jarv wants approval for:\n\n${question}\n\nReply **yes** to allow, **no** to deny.`)
-      .then(() => new Promise<boolean>((resolve) => (pendingResolve = resolve)));
+    const body = `🔒 Jarv wants approval for:\n\n${question}\n\nReply **yes** to allow, **no** to deny. Or **yes all** to allow every remaining step of this task without asking again.`;
+    return (async () => {
+      for (const part of chunkText(body)) {
+        await client.sendMessage(ownerId, part);
+      }
+    })().then(
+      () =>
+        new Promise<boolean>((resolve) => {
+          const timer = setTimeout(() => {
+            pendingResolve = null;
+            client.sendMessage(ownerId, '⏰ No answer in time — assuming **no** for now. Re-ask and I\'ll retry.').catch(() => {});
+            resolve(false);
+          }, APPROVAL_TIMEOUT_MS);
+          pendingResolve = (ok) => {
+            clearTimeout(timer);
+            resolve(ok);
+          };
+        }),
+    );
   });
 
   // Serialize message processing so agent runs don't interleave, but keep
@@ -114,6 +140,7 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
 
   const processMessage = async (text: string): Promise<void> => {
     process.stdout.write(`[jarv-genie] telegram <- ${text.slice(0, 120)}\n`);
+    autoApprove = false;
     const acquired = tryAcquireBusy();
     try {
       const guard = await ensureResources();
@@ -158,6 +185,10 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
       const v = verdict(text.trim());
       const resolve = pendingResolve;
       pendingResolve = null;
+      if (AUTO_APPROVE_RE.test(text.trim())) {
+        autoApprove = true;
+        await client.sendMessage(from, '👍 Got it — approving this and every remaining step of the task.');
+      }
       resolve(v ?? true);
       return;
     }

@@ -54,7 +54,17 @@ export class ModelRouter {
       return await this.primary.chat(opts);
     } catch (err) {
       this.lastError = err;
-      if (this.fallback) return await this.fallback.chat(opts);
+      if (this.fallback) {
+        try {
+          return await this.fallback.chat(opts);
+        } catch {
+          // Fallback failed too (e.g. the local model is offline). Surface the
+          // primary error instead — it is almost always the real one, and
+          // hiding it behind a dead-fallback "Connection error" makes bugs
+          // impossible to diagnose.
+          throw err;
+        }
+      }
       throw err;
     }
   }
@@ -64,7 +74,13 @@ export class ModelRouter {
       return await this.primary.streamChat(opts, onDelta);
     } catch (err) {
       this.lastError = err;
-      if (this.fallback) return await this.fallback.streamChat(opts, onDelta);
+      if (this.fallback) {
+        try {
+          return await this.fallback.streamChat(opts, onDelta);
+        } catch {
+          throw err;
+        }
+      }
       throw err;
     }
   }

@@ -89,10 +89,14 @@ write_plist "com.fortress.jarvgenie-hub" "<string>hub</string><string>--host</st
 # Scheduled daemon (heartbeats, monitors).
 write_plist "com.fortress.jarvgenie-heartbeat" "<string>agent</string>" "$LAUNCH_DIR/com.fortress.jarvgenie-heartbeat.plist"
 
-# Keep the Mac awake as a 24/7 node (prevent idle/system sleep while on power;
-# the display may still sleep). Opt out with JARV_GENIE_NO_KEEPAWAKE=1.
+# Keep the Mac awake as a 24/7 node: -u asserts UserIsActive (keeps the user
+# session + network hot), -i prevents idle sleep, -s prevents system sleep,
+# -m prevents disk idle — all while the display may still sleep.
+# Note: closing the lid still suspends on Apple silicon regardless of
+# caffeinate/pmset; keep the lid open (or nearly open) for true 24/7.
+# Opt out with JARV_GENIE_NO_KEEPAWAKE=1.
 if [ "${JARV_GENIE_NO_KEEPAWAKE:-0}" != "1" ]; then
-  write_bin_plist "com.fortress.jarvgenie-keepawake" "<string>/usr/bin/caffeinate</string><string>-ism</string>" "$LAUNCH_DIR/com.fortress.jarvgenie-keepawake.plist"
+  write_bin_plist "com.fortress.jarvgenie-keepawake" "<string>/usr/bin/caffeinate</string><string>-uism</string>" "$LAUNCH_DIR/com.fortress.jarvgenie-keepawake.plist"
   KEEPAWAKE_SVC=(com.fortress.jarvgenie-keepawake)
 else
   KEEPAWAKE_SVC=()
@@ -136,7 +140,7 @@ done
 echo "done. hub reachable at: $NODE_BIN $DIST hub --url"
 echo
 echo "to make Jarv truly 24/7 (like a butler who never sleeps):"
-echo "  sudo pmset -a sleep 0 disablesleep 1   # machine never sleeps on any power source"
+echo "  sudo pmset -a sleep 0 disablesleep 1   # machine never sleeps on idle (lid must stay open on Apple silicon)"
 echo "  System Settings > Users & Groups > auto-login   # it starts before you log in"
 echo "  enable always-listening voice:  JARV_GENIE_ENABLE_VOICE=1 bash scripts/install-services.sh"
 echo "  (you need sox + whisper.cpp and mic permission; run \`jarv-genie perms\` to check)"

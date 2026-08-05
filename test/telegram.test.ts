@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import { test } from 'node:test';
 import { TelegramClient } from '../src/telegram/client.js';
-import { approvalActive, requireApproval, setApprovalHandler } from '../src/approvals.js';
+import { approvalActive, requireApproval, setApprovalHandler, approvalQuestion } from '../src/approvals.js';
 import { Agent } from '../src/agent/agent.js';
 import { chunkText } from '../src/cli/telegram.js';
 import type { ChatMessage } from '../src/agent/types.js';
@@ -81,6 +81,20 @@ test('approval gate waits on the active channel handler', async () => {
   } finally {
     setApprovalHandler(null);
   }
+});
+
+test('approvalQuestion keeps small calls intact and truncates oversized arguments', () => {
+  const small = approvalQuestion('app_command', { app: 'system', action: 'wifiRecycle' });
+  assert.strictEqual(small, 'app_command{"app":"system","action":"wifiRecycle"}');
+
+  const big = approvalQuestion('file_write_any', {
+    path: '/Users/tfe/jarv-genie/src/tools/trackrecord.ts',
+    content: 'import path from node:path\n' + 'x'.repeat(5000),
+  });
+  assert.match(big, /^file_write_any/);
+  assert.match(big, /trackrecord\.ts/, 'the identifying path survives');
+  assert.ok(big.length < 900, 'approval stays far under Telegram\u2019s 4096 limit');
+  assert.match(big, /truncated/);
 });
 
 function buildWithConsequentialTool(approval: boolean): { agent: Agent; executed: string[] } {

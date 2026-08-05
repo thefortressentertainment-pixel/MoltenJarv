@@ -138,9 +138,20 @@ const SYSTEM_ACTIONS: Record<string, Builder> = {
   unmute: () => 'set volume output muted false',
   clipboardSet: (p) => `set the clipboard to "${esc(String(p.text ?? ''))}"`,
   wifiOn: () => 'do shell script "sudo -n /usr/sbin/networksetup -setairportpower en0 on"',
-  wifiOff: () => 'do shell script "sudo -n /usr/sbin/networksetup -setairportpower en0 off"',
-  bluetoothOn: () => 'do shell script "sudo -n /opt/homebrew/bin/blueutil -p 1"',
-  bluetoothOff: () => 'do shell script "sudo -n /opt/homebrew/bin/blueutil -p 0"',
+  // Turning Wi-Fi off cuts Jarv's own internet (brain + Telegram channel), so
+  // it can never approve or deliver the follow-up "turn it back on". Two
+  // safeguards: wifiRecycle for "off then back on" (one approval, one local
+  // command), and a 10-minute self-heal timer on wifiOff that re-enables Wi-Fi
+  // in a detached root job that survives the bridge going offline. The restore
+  // is skipped if the user has "kept it off" via wifiNoAutoRestore.
+  wifiOff: () =>
+    'do shell script "sudo -n /usr/sbin/networksetup -setairportpower en0 off; nohup /bin/sh -c \'sleep 600; [ -f ~/.jarv-genie/wifi-auto-restore.disabled ] || /usr/bin/sudo -n /usr/sbin/networksetup -setairportpower en0 on\' >/dev/null 2>&1 &"',
+  wifiRecycle: () =>
+    'do shell script "sudo -n /usr/sbin/networksetup -setairportpower en0 off; sleep 3; sudo -n /usr/sbin/networksetup -setairportpower en0 on"',
+  wifiNoAutoRestore: () => 'do shell script "touch ~/.jarv-genie/wifi-auto-restore.disabled"',
+  wifiAllowAutoRestore: () => 'do shell script "rm -f ~/.jarv-genie/wifi-auto-restore.disabled"',
+  bluetoothOn: () => 'do shell script "/opt/homebrew/bin/blueutil -p 1"',
+  bluetoothOff: () => 'do shell script "/opt/homebrew/bin/blueutil -p 0"',
   dndOn: () => 'do shell script "defaults -currentHost write com.apple.notificationcenterui doNotDisturb -boolean true && killall NotificationCenter"',
   dndOff: () => 'do shell script "defaults -currentHost write com.apple.notificationcenterui doNotDisturb -boolean false && killall NotificationCenter"',
   emptyTrash: () => 'do shell script "find ~/.Trash -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null"',
@@ -177,7 +188,7 @@ export function appsTools(): ToolDefinition[] {
       description:
         `Drive an app or the system with one curated command — the manual actions a person would take. Apps: ${ALL_APPS}. Every app supports open and quit. ` +
         'Spotify/Music: play (uri), playPause, next, prev. Notes: newNote. Messages: send. Safari/Chrome: openUrl, newTab, back, forward. Calendar: addEvent (title, date). ' +
-        'System: sleep, lock, displaySleep, volumeSet (value 0-100), volumeUp/Down, mute, unmute, brightnessUp/Down, clipboardSet, wifiOn/wifiOff, bluetoothOn/bluetoothOff, dndOn/dndOff, emptyTrash, restart, screenshot (saves to workspace). ' +
+        'System: sleep, lock, displaySleep, volumeSet (value 0-100), volumeUp/Down, mute, unmute, brightnessUp/Down, clipboardSet, wifiOn/wifiOff/wifiRecycle (off-then-on in one call)/wifiNoAutoRestore (skip the 10-min auto re-enable)/wifiAllowAutoRestore, bluetoothOn/bluetoothOff, dndOn/dndOff, emptyTrash, restart, screenshot (saves to workspace). ' +
         'One call does the whole action — no UI clicking. Setting volume never changes playback. REQUIRES consent.',
       inputSchema: {
         type: 'object',

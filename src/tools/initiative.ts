@@ -2,6 +2,7 @@ import type { ToolDefinition } from '../agent/types.js';
 import { createInitiativeStore, type InitiativeStatus } from '../initiatives.js';
 import { getSecretStore } from '../config/secrets.js';
 import { TelegramClient } from '../telegram/client.js';
+import { appendDelivery } from './deliverylog.js';
 
 const VALID_STATUS: InitiativeStatus[] = ['proposed', 'approved', 'declined', 'in_progress', 'done'];
 
@@ -82,7 +83,30 @@ export function initiativeTools(): ToolDefinition[] {
         }
         const updated = store.setStatus(id, status);
         if (!updated) return { ok: false, error: `no initiative with id "${id}"` };
-        return { ok: true, initiative: updated };
+
+        // An initiative that reaches "done" is a delivered thing — prove it in
+        // the hash-chained Delivery Track Record automatically.
+        let loggedHash: string | undefined;
+        let logError: string | undefined;
+        if (status === 'done') {
+          try {
+            const logged = await appendDelivery(
+              `Completed initiative ${id}: ${updated.idea}`,
+              'other',
+              `Initiative marked done — tracked in the initiative ledger, entry hash-chained to the Delivery Track Record.`,
+            );
+            if (!logged.ok) logError = logged.error;
+            else loggedHash = logged.hash;
+          } catch (err) {
+            logError = err instanceof Error ? err.message : String(err);
+          }
+        }
+        return {
+          ok: true,
+          initiative: updated,
+          ...(loggedHash ? { deliveryHash: loggedHash } : {}),
+          ...(logError ? { deliveryLogError: logError } : {}),
+        };
       },
     },
   ];

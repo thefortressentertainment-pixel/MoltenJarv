@@ -42,6 +42,14 @@ test('recentContext truncates tool payloads to a short hint', () => {
   assert.ok(out.length < 160);
 });
 
+test('recentContext keeps the tail of long turns so a terse yes/no has context', () => {
+  const long = 'start ' + 'x'.repeat(1200) + ' Shall I approve it?';
+  const out = recentContext([a(long)], RECENT_WINDOW_MS, 0);
+  assert.match(out, /Shall I approve it\?/, 'question at the end of a long message survives');
+  assert.match(out, /start/, 'head is kept too');
+  assert.ok(out.length < 450, 'still capped near MAX_CONTENT_CHARS');
+});
+
 test('composeRecentContextBlock wraps the excerpt with the skill hint and is empty when no history', () => {
   assert.strictEqual(composeRecentContextBlock([]), '');
   const block = composeRecentContextBlock([u('hello'), a('hi there')]);
