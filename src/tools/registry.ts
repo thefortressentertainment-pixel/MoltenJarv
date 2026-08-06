@@ -1,4 +1,4 @@
-import type { ToolContext, ToolDefinition } from '../agent/types.js';
+import type { ToolContext, ToolDefinition, BodySystem } from '../agent/types.js';
 import fs from 'node:fs';
 
 export interface ExecutionResult {
@@ -24,6 +24,31 @@ export class ToolRegistry {
 
   has(name: string): boolean {
     return this.map.has(name);
+  }
+
+  /** All tools that belong to a body system (see docs/ANATOMY.md). */
+  bySystem(system: BodySystem): ToolDefinition[] {
+    return this.list().filter((t) => t.system === system);
+  }
+
+  /** Perception organs: eyes, ears, reading, proprioception. */
+  senses(): ToolDefinition[] {
+    return this.bySystem('sense');
+  }
+
+  /** Action organs: hands, arms, fingers, legs. */
+  effectors(): ToolDefinition[] {
+    return this.bySystem('effector');
+  }
+
+  /** Group every organ by its body system, for introspection. */
+  organs(): Map<BodySystem, ToolDefinition[]> {
+    const out = new Map<BodySystem, ToolDefinition[]>();
+    for (const system of ['sense', 'effector', 'memory', 'voice', 'autonomic', 'immune', 'integration'] as BodySystem[]) {
+      const tools = this.bySystem(system);
+      if (tools.length > 0) out.set(system, tools);
+    }
+    return out;
   }
 
   async execute(name: string, args: Record<string, unknown>, ctx: ToolContext): Promise<ExecutionResult> {

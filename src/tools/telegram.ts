@@ -13,6 +13,7 @@ export function telegramTools(): ToolDefinition[] {
   return [
     {
       name: 'telegram_send',
+      system: 'integration',
       description:
         'Send a message to the owner on Telegram on your own initiative (e.g. a scheduled result, an alert, or a report). Use when the user should be told something outside of the current reply. Requires the Telegram bridge to be configured.',
       inputSchema: {
@@ -23,6 +24,7 @@ export function telegramTools(): ToolDefinition[] {
         required: ['text'],
       },
       consequential: true,
+      failClosed: true,
       handler: async (args) => {
         const secrets = getSecretStore();
         const token = secrets.get('TELEGRAM_BOT_TOKEN');

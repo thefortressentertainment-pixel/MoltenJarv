@@ -56,6 +56,7 @@ export function reminderTools(): ToolDefinition[] {
   return [
     {
       name: 'reminder_create',
+      system: 'autonomic',
       description:
         'Create a one-time reminder in the macOS Reminders app with an optional due date (ISO 8601, e.g. "2026-08-08T07:00:00"). For RECURRING alarms/reminders use schedule_add with a cron expression instead. Requires computer.allowControl=true.',
       inputSchema: {
@@ -91,6 +92,7 @@ export function reminderTools(): ToolDefinition[] {
     },
     {
       name: 'reminder_list',
+      system: 'autonomic',
       description: 'List the names of all reminders in a list (default "Reminders").',
       inputSchema: {
         type: 'object',
@@ -117,6 +119,7 @@ export function reminderTools(): ToolDefinition[] {
     },
     {
       name: 'reminder_delete',
+      system: 'autonomic',
       description: 'Delete all reminders whose name matches in a list (default "Reminders").',
       inputSchema: {
         type: 'object',

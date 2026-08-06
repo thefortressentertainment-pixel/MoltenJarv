@@ -23,7 +23,7 @@ import { VERSION } from './config/defaults.js';
 import { getTokenStore } from './hub/auth.js';
 import { runMcpServer } from './mcp/server.js';
 import { getLinkStore, RemoteClient } from './remote/client.js';
-import { loadAgentConfig } from './scheduler/index.js';
+import { loadAgentConfig, recordDaemonCrash, resetDaemonCrashCount } from './scheduler/index.js';
 import { serveUi, type UiServerOptions } from './ui/server.js';
 
 interface Args {
@@ -382,13 +382,37 @@ async function main(): Promise<void> {
     // default: run the daemon
     process.stdout.write(`[jarv-genie] agent daemon (${backend.kind}) — ctrl-c to stop\n`);
     printSchedules(loadAgentConfig());
+    let stopped = false;
+    // A single bad tick must never bubble out of the daemon: this service runs
+    // under launchd with KeepAlive=true, so an uncaught throw would let the
+    // process exit(1) hot and get respawned in a crash-loop. Each tick is fully
+    // isolated and, on repeated failures, we back off exponentially so a bona
+    // fide stuck subsystem can't pin the machine.
+    let cleanTicks = 0;
+    const CLEAN_RESET = 6; // consecutive clean ticks before arming the breaker is cleared
     const tick = async () => {
-      await runAgentSchedule(loadAgentConfig(), backend);
+      try {
+        await runAgentSchedule(loadAgentConfig(), backend);
+        cleanTicks++;
+        if (cleanTicks >= CLEAN_RESET) {
+          resetDaemonCrashCount();
+          cleanTicks = 0;
+        }
+      } catch (err) {
+        cleanTicks = 0;
+        process.stdout.write(`[jarv-genie] tick error: ${err instanceof Error ? err.message : String(err)}\n`);
+        const delay = recordDaemonCrash();
+        process.stdout.write(`[jarv-genie] backing off ${Math.round(delay / 1000)}s after repeated failures\n`);
+        if (!stopped) setTimeout(tick, Math.max(delay, 1_000));
+        return;
+      }
+      // Wait for the previous tick to finish before scheduling the next one,
+      // so a long-running schedule can't stack overlapping ticks.
+      if (!stopped) setTimeout(tick, 30_000);
     };
     await tick();
-    const timer = setInterval(tick, 30_000);
     process.on('SIGINT', () => {
-      clearInterval(timer);
+      stopped = true;
       process.exit(0);
     });
     await new Promise(() => {});

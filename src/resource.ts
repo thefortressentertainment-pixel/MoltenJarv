@@ -134,20 +134,205 @@ export async function ensureResources(): Promise<'ok' | 'cleaned' | 'blocked'> {
   return 'cleaned';
 }
 
-/** Try to claim the busy lock (single-task execution across processes). */
-export function tryAcquireBusy(lockPath = busyLockPath()): boolean {
+// ─── Autonomic nervous system ────────────────────────────────────────────────
+// Jarv is modeled as a living organism (see docs/ANATOMY.md). Like the human
+// autonomic nervous system, this layer runs below conscious thought: it SENSES
+// the organism's vitals and REGULATES them — cleaning up, compacting, backing
+// off, or refusing new work — without the neocortex (the agent loop) having to
+// think about it. The existing `ensureResources` / busy-lock API is preserved;
+// callers use `sense()` + `regulate()` for the full vital-signs loop.
+
+export interface Vitals {
+  /** Free memory as a percentage of the machine total (100 = plenty). */
+  freeMemoryPercent: number;
+  /** Fraction of the working-context budget already consumed (0..1; ≥1 = over budget). */
+  contextUsage: number;
+  /** Whether another process holds the busy-lock. */
+  busy: boolean;
+  /** Approximate disk-free percentage on the data home volume. */
+  freeDiskPercent: number;
+  /** Millisecond timestamp of the reading. */
+  sampledAt: number;
+}
+
+export type RegulateResult = 'ok' | 'cleaned' | 'compacted' | 'blocked';
+
+const CONTEXT_WARN_CHARS = 90_000; // session + working context nearing the 100k budget
+const DISK_LOW_PERCENT = 10;
+
+/** Cap the working session file at this size (bytes) when it grows too large. */
+const SESSION_CAP_BYTES = 2 * 1024 * 1024;
+
+/** Tail of the chat session kept when the autonomic system compacts it. */
+const SESSION_KEEP_LINES = 200;
+
+/**
+ * Sense the organism's vitals. Cheap, non-mutating, safe to call before any
+ * task. Reports memory headroom, working-context budget, busy state, and disk.
+ * `busy` is true only when ANOTHER process holds the busy-lock — a lock the
+ * caller itself holds is not reported as busy.
+ */
+export async function sense(): Promise<Vitals> {
+  const [free, busy, freeDisk] = await Promise.all([
+    freeMemoryPercent(),
+    Promise.resolve(busyByOthers()),
+    freeDiskPercent(),
+  ]);
+  const contextUsage = await contextUsageFraction();
+  return {
+    freeMemoryPercent: free,
+    contextUsage,
+    busy,
+    freeDiskPercent: freeDisk,
+    sampledAt: Date.now(),
+  };
+}
+
+/** True when a different process holds the busy-lock (not this one). */
+export function busyByOthers(lockPath = busyLockPath()): boolean {
+  if (!lockIsFresh(lockPath)) return false;
+  const raw = readLock(lockPath);
+  if (raw && Number(raw.split(':')[0]) === process.pid) return false; // our own lock
+  return lockIsOwnedByLiveProcess(lockPath);
+}
+
+/** Read the raw lock contents, or null when absent/unreadable. */
+function readLock(lockPath: string): string | null {
   try {
-    const st = fs.statSync(lockPath);
-    if (Date.now() - st.mtimeMs < BUSY_TTL_MS) return false;
+    return fs.readFileSync(lockPath, 'utf8');
   } catch {
-    // no lock yet
+    return null;
   }
+}
+
+/**
+ * Regulate based on sensed vitals. Acts to keep the organism stable:
+ *  - `cleaned` — freed memory / disk (unloaded models, pruned drawings/temp).
+ *  - `compacted` — shrank an overgrown session file to its recent tail.
+ *  - `blocked` — critically low memory; caller should refuse new work.
+ *  - `ok` — everything within normal range; nothing needed doing.
+ */
+export async function regulate(vitals: Vitals): Promise<RegulateResult> {
+  if (vitals.freeMemoryPercent < BLOCK_WATER) return 'blocked';
+  let acted: RegulateResult = 'ok';
+  if (vitals.freeMemoryPercent < LOW_WATER || vitals.freeDiskPercent < DISK_LOW_PERCENT) {
+    await cleanupResources();
+    acted = 'cleaned';
+  }
+  if (vitals.contextUsage >= 1) {
+    const compacted = compactSession();
+    if (compacted) acted = 'compacted';
+  }
+  return acted;
+}
+
+/**
+ * Fraction (0..1) of the working-context budget already consumed by the
+ * largest session file. 1.0 or above means the liver needs to filter — the
+ * session has outgrown the budget the model can actually attend to.
+ */
+async function contextUsageFraction(): Promise<number> {
+  try {
+    const dir = path.join(dataHome(), 'memory', 'sessions');
+    let max = 0;
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith('.jsonl')) continue;
+      const stat = fs.statSync(path.join(dir, f));
+      if (stat.size > max) max = stat.size;
+    }
+    return Math.min(1, max / CONTEXT_WARN_CHARS);
+  } catch {
+    return 0;
+  }
+}
+
+/** Free disk percentage on the volume holding ~/.jarv-genie (best-effort). */
+function freeDiskPercent(): number {
+  try {
+    const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
+    const out = execFileSync('/bin/df', ['-k', dataHome()], { encoding: 'utf8' });
+    const line = out.split('\n')[1];
+    if (!line) return 100;
+    const parts = line.trim().split(/\s+/);
+    const capacity = Number((parts[4] ?? '100%').replace('%', ''));
+    return Number.isNaN(capacity) ? 100 : 100 - capacity;
+  } catch {
+    return 100;
+  }
+}
+
+/**
+ * Shrink the largest session file to its recent tail (keep the newest turns,
+ * drop the ancient bulk). Returns the number of bytes freed, or 0 if nothing
+ * needed trimming. The session store is append-only history; the model only
+ * attends to the newest tail anyway (trimHistory caps it), so dropping the
+ * old bulk loses nothing the cortex can actually use.
+ */
+function compactSession(): number {
+  try {
+    const dir = path.join(dataHome(), 'memory', 'sessions');
+    let biggest: { file: string; size: number } | null = null;
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith('.jsonl')) continue;
+      const full = path.join(dir, f);
+      const stat = fs.statSync(full);
+      if (!biggest || stat.size > biggest.size) biggest = { file: full, size: stat.size };
+    }
+    if (!biggest || biggest.size <= SESSION_CAP_BYTES) return 0;
+    const lines = fs.readFileSync(biggest.file, 'utf8').split('\n').filter((l) => l.length > 0);
+    const tail = lines.slice(-SESSION_KEEP_LINES);
+    fs.writeFileSync(biggest.file, tail.join('\n') + '\n');
+    return biggest.size;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Try to claim the busy lock (single-task execution across processes).
+ *
+ * Safely handles two failure modes that used to cause trouble:
+ *  - A previous owner that died mid-task: the lock is re-claimed once the old
+ *    owner's PID is no longer running (or the lock is past its TTL), so a crash
+ *    can't hold the lock forever.
+ *  - A write failure: we return `false` (honest) rather than pretending we
+ *    acquired the lock, which previously let two processes race.
+ */
+export function tryAcquireBusy(lockPath = busyLockPath()): boolean {
+  if (lockIsOwnedByLiveProcess(lockPath)) return false;
+  if (lockIsFresh(lockPath)) return false;
   try {
     fs.mkdirSync(path.dirname(lockPath), { recursive: true });
-    fs.writeFileSync(lockPath, String(Date.now()));
+    fs.writeFileSync(lockPath, `${process.pid}:${Date.now()}`);
     return true;
   } catch {
-    return true;
+    return false;
+  }
+}
+
+function lockIsFresh(lockPath: string): boolean {
+  try {
+    return Date.now() - fs.statSync(lockPath).mtimeMs < BUSY_TTL_MS;
+  } catch {
+    return false;
+  }
+}
+
+/** True if the lock names a PID that is still alive (and within TTL). */
+function lockIsOwnedByLiveProcess(lockPath: string): boolean {
+  try {
+    const raw = fs.readFileSync(lockPath, 'utf8');
+    const pid = Number(raw.split(':')[0]);
+    if (!Number.isInteger(pid) || pid <= 0) return false;
+    if (Date.now() - fs.statSync(lockPath).mtimeMs >= BUSY_TTL_MS) return false; // stale anyway
+    try {
+      process.kill(pid, 0); // signal 0 = existence check, no signal sent
+      return true;
+    } catch {
+      return false; // owner is gone; lock is dead
+    }
+  } catch {
+    return false;
   }
 }
 
@@ -160,10 +345,9 @@ export function releaseBusy(lockPath = busyLockPath()): void {
 }
 
 export function isBusy(lockPath = busyLockPath()): boolean {
-  try {
-    const st = fs.statSync(lockPath);
-    return Date.now() - st.mtimeMs < BUSY_TTL_MS;
-  } catch {
-    return false;
-  }
+  if (!lockIsFresh(lockPath)) return false;
+  // A lock whose owner process is gone is dead — never report the system as
+  // busy off the back of a crashed task.
+  if (lockIsOwnedByLiveProcess(lockPath)) return true;
+  return false;
 }

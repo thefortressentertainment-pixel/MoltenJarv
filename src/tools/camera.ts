@@ -9,6 +9,7 @@ export function cameraTools(): ToolDefinition[] {
   return [
     {
       name: 'camera_capture',
+      system: 'sense',
       description:
         'Capture a still photo from the built-in camera on the hub machine and describe what (and who) is in view. Requires macOS camera permission and `imagesnap` (brew install imagesnap) or ffmpeg. Optionally pass a question about what you want to check.',
       inputSchema: {
@@ -28,6 +29,7 @@ export function cameraTools(): ToolDefinition[] {
             question,
             model: comp.cameraModel ?? comp.visionModel,
             endpoint: comp.cameraEndpoint ?? comp.visionEndpoint,
+            apiKeyEnv: comp.cameraApiKeyEnv ?? comp.visionApiKeyEnv,
             defaultPrompt: 'Describe what is visible in this camera photo, concisely. Mention people, their activity, and the room.',
           });
           return { ok: true, description };

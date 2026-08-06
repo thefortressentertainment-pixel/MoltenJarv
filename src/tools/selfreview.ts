@@ -75,6 +75,7 @@ export function selfReviewTools(): ToolDefinition[] {
   return [
     {
       name: 'self_review',
+      system: 'autonomic',
       description:
         'Run a self-review: run the test suite and typecheck of the Jarv Genie codebase, and read the optimization plan. Returns current health and the open optimization items. Use to deliberate on the next improvement to Jarv itself.',
       inputSchema: { type: 'object', properties: {} },

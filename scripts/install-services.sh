@@ -18,7 +18,7 @@ if [ -z "$NODE_BIN" ]; then
 fi
 
 write_plist() {
-  local label="$1" extra="$2" out="$3"
+  local label="$1" extra="$2" out="$3" throttle="${4:-60}"
   cat > "$out" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -29,6 +29,7 @@ write_plist() {
     <key>ProgramArguments</key>
     <array>
         <string>$NODE_BIN</string>
+        <string>--max-old-space-size=1024</string>
         <string>$DIST</string>
         $extra
     </array>
@@ -86,8 +87,11 @@ EOF
 # Always-on web hub (phone/LAN/Tailscale access).
 write_plist "com.fortress.jarvgenie-hub" "<string>hub</string><string>--host</string><string>0.0.0.0</string><string>--port</string><string>3001</string><string>--no-open</string>" "$LAUNCH_DIR/com.fortress.jarvgenie-hub.plist"
 
-# Scheduled daemon (heartbeats, monitors).
-write_plist "com.fortress.jarvgenie-heartbeat" "<string>agent</string>" "$LAUNCH_DIR/com.fortress.jarvgenie-heartbeat.plist"
+# Scheduled daemon (heartbeats, monitors). Higher ThrottleInterval so a crash
+# (with KeepAlive=true) backs off for up to 5 minutes instead of hot-respawning
+# in a loop. The in-code crash breaker handles real backoff; this is launchd's
+# own floor on respawn rate.
+write_plist "com.fortress.jarvgenie-heartbeat" "<string>agent</string>" "$LAUNCH_DIR/com.fortress.jarvgenie-heartbeat.plist" 300
 
 # Keep the Mac awake as a 24/7 node: -u asserts UserIsActive (keeps the user
 # session + network hot), -i prevents idle sleep, -s prevents system sleep,

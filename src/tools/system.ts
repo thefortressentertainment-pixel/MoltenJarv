@@ -36,6 +36,7 @@ export function systemTools(): ToolDefinition[] {
   return [
     {
       name: 'run_shell',
+      system: 'effector',
       description:
         'Run a shell command on the hub machine (bash). Returns the exit code and captured stdout/stderr (truncated). Use for anything the user could type in a terminal: installing tools, git, process management, system info. REQUIRES explicit user consent when a remote channel is active.',
       inputSchema: {
@@ -73,6 +74,7 @@ export function systemTools(): ToolDefinition[] {
     },
     {
       name: 'file_read_any',
+      system: 'effector',
       description: 'Read any text file on the machine (full path). Returns size and content (truncated).',
       inputSchema: {
         type: 'object',
@@ -89,6 +91,7 @@ export function systemTools(): ToolDefinition[] {
     },
     {
       name: 'file_write_any',
+      system: 'effector',
       description:
         'Write UTF-8 text to any path on the machine, creating parent directories. REQUIRES explicit user consent when a remote channel is active.',
       inputSchema: {
@@ -111,6 +114,7 @@ export function systemTools(): ToolDefinition[] {
     },
     {
       name: 'file_list_any',
+      system: 'effector',
       description: 'List the contents of any directory on the machine.',
       inputSchema: {
         type: 'object',
@@ -128,6 +132,7 @@ export function systemTools(): ToolDefinition[] {
     },
     {
       name: 'file_delete_any',
+      system: 'effector',
       description: 'Delete a file or empty directory at any path on the machine. REQUIRES explicit user consent when a remote channel is active.',
       inputSchema: {
         type: 'object',
@@ -145,6 +150,7 @@ export function systemTools(): ToolDefinition[] {
     },
     {
       name: 'file_move_any',
+      system: 'effector',
       description: 'Move or rename a file/directory at any path. REQUIRES explicit user consent when a remote channel is active.',
       inputSchema: {
         type: 'object',
@@ -167,6 +173,7 @@ export function systemTools(): ToolDefinition[] {
     },
     {
       name: 'file_copy_any',
+      system: 'effector',
       description: 'Copy a file/directory to a new path. REQUIRES explicit user consent when a remote channel is active.',
       inputSchema: {
         type: 'object',
@@ -189,6 +196,7 @@ export function systemTools(): ToolDefinition[] {
     },
     {
       name: 'open_file',
+      system: 'effector',
       description: 'Open a file/folder in its default app (or Finder). REQUIRES explicit user consent when a remote channel is active.',
       inputSchema: {
         type: 'object',
@@ -205,6 +213,7 @@ export function systemTools(): ToolDefinition[] {
     },
     {
       name: 'reveal_in_finder',
+      system: 'effector',
       description: 'Reveal a file/folder in Finder (selects it in a window). REQUIRES explicit user consent when a remote channel is active.',
       inputSchema: {
         type: 'object',
@@ -221,6 +230,7 @@ export function systemTools(): ToolDefinition[] {
     },
     {
       name: 'clipboard_get',
+      system: 'sense',
       description: 'Read the current clipboard text. Read-only.',
       inputSchema: { type: 'object', properties: {} },
       handler: async () => {
@@ -230,6 +240,7 @@ export function systemTools(): ToolDefinition[] {
     },
     {
       name: 'file_find',
+      system: 'sense',
       description:
         'Search the Mac (Spotlight/mdfind) for files and return paths. Read-only. Great for "find my resume" or locating anything on disk.',
       inputSchema: {
@@ -251,6 +262,7 @@ export function systemTools(): ToolDefinition[] {
     },
     {
       name: 'file_zip',
+      system: 'effector',
       description: 'Create a zip archive of a file or folder. REQUIRES explicit user consent when a remote channel is active.',
       inputSchema: {
         type: 'object',
@@ -272,6 +284,7 @@ export function systemTools(): ToolDefinition[] {
     },
     {
       name: 'file_unzip',
+      system: 'effector',
       description: 'Extract a zip archive to a destination folder. REQUIRES explicit user consent when a remote channel is active.',
       inputSchema: {
         type: 'object',

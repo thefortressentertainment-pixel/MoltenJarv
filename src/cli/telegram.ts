@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { getSecretStore } from '../config/secrets.js';
-import { setApprovalHandler } from '../approvals.js';
-import { ensureResources, tryAcquireBusy, releaseBusy } from '../resource.js';
+import { setApprovalHandler, setAutoApprove, isAutoApproving } from '../approvals.js';
+import { tryAcquireBusy, releaseBusy, sense, regulate } from '../resource.js';
 import { TelegramClient, type TgUpdate } from '../telegram/client.js';
 import { TaskRunner } from '../agent/taskrunner.js';
 import type { AgentContext } from './index.js';
@@ -23,8 +23,9 @@ const DENY_RE = /^(no|n|deny|denied|cancel|don'?t|stop)\b/i;
 const AUTO_APPROVE_RE = /^(yes all|yes to all|allow all|approve all|y all|go ahead all)\b/i;
 // An approval the owner never answers must not hold the busy-lock (and starve
 // the scheduled agent) forever. Auto-deny after this window so the task
-// resolves and the lock is released. Shorter than the 30-min busy-lock TTL.
-const APPROVAL_TIMEOUT_MS = 15 * 60 * 1000;
+// resolves and the lock is released. Long enough for a careful reader; still
+// shorter than the 30-min busy-lock TTL.
+const APPROVAL_TIMEOUT_MS = 25 * 60 * 1000;
 
 function verdict(text: string): boolean | null {
   if (APPROVAL_RE.test(text)) return true;
@@ -106,12 +107,12 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
   let pendingResolve: ((ok: boolean) => void) | null = null;
   // When the owner replies "yes all", approve every remaining consequential
   // tool call for the current task without asking again. Reset per task.
-  let autoApprove = false;
+  setAutoApprove(false);
 
   setApprovalHandler((question: string) => {
     if (!chatId) return Promise.resolve(false);
     const ownerId = chatId;
-    if (autoApprove) return Promise.resolve(true);
+    if (isAutoApproving()) return Promise.resolve(true);
     process.stdout.write(`[jarv-genie] telegram approval requested: ${question.slice(0, 120)}\n`);
     const body = `🔒 Jarv wants approval for:\n\n${question}\n\nReply **yes** to allow, **no** to deny. Or **yes all** to allow every remaining step of this task without asking again.`;
     return (async () => {
@@ -140,15 +141,27 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
 
   const processMessage = async (text: string): Promise<void> => {
     process.stdout.write(`[jarv-genie] telegram <- ${text.slice(0, 120)}\n`);
-    autoApprove = false;
+    setAutoApprove(false);
     const acquired = tryAcquireBusy();
+    if (!acquired) {
+      // Another process (e.g. the scheduled heartbeat) is mid-task. The
+      // busy-lock serializes cross-process work — don't pile on.
+      await client.sendMessage(chatId!, '🫀 Slightly overloaded right now — give me a minute, then try again.');
+      return;
+    }
     try {
-      const guard = await ensureResources();
+      // Autonomic nervous system: sense vitals, then regulate (clean/compact/
+      // block) before the cortex does any work. Note: we already hold the busy
+      // lock, so vitals.busy will read true for our own lock — only memory and
+      // context matter here.
+      const vitals = await sense();
+      const guard = await regulate(vitals);
       if (guard === 'blocked') {
         await client.sendMessage(chatId!, '⚠️ Memory is critically low right now — hold on, give me a minute, then try again.');
         return;
       }
-      if (guard === 'cleaned') process.stdout.write('[jarv-genie] freed memory before task\n');
+      if (guard === 'cleaned') process.stdout.write('[jarv-genie] autonomic: freed memory before task\n');
+      if (guard === 'compacted') process.stdout.write('[jarv-genie] autonomic: compacted session before task\n');
       const result = await runner.run(text);
       process.stdout.write(`[jarv-genie] telegram -> ${(result.text || '(no response)').slice(0, 160)}\n`);
       for (const part of chunkText(result.text || '(no response)')) {
@@ -186,7 +199,7 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
       const resolve = pendingResolve;
       pendingResolve = null;
       if (AUTO_APPROVE_RE.test(text.trim())) {
-        autoApprove = true;
+        setAutoApprove(true);
         await client.sendMessage(from, '👍 Got it — approving this and every remaining step of the task.');
       }
       resolve(v ?? true);

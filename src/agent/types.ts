@@ -8,6 +8,19 @@ export interface ToolCall {
   arguments: Record<string, unknown>;
 }
 
+/**
+ * The body system a tool belongs to — Jarv is modeled as an organism, and
+ * every tool is an organ of that organism. See docs/ANATOMY.md.
+ */
+export type BodySystem =
+  | 'sense'       // perception: eyes, ears, reading, proprioception
+  | 'effector'    // action: hands, arms, fingers, legs
+  | 'memory'      // storage and recall
+  | 'voice'       // speaking and hearing surfaces
+  | 'autonomic'   // self-regulation: monitors, scheduler, shutdown
+  | 'immune'      // defense and verification
+  | 'integration'; // external channels: Telegram, web, calendar, email, Moltbook
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string | null;
@@ -32,8 +45,20 @@ export interface ToolDefinition {
     required?: string[];
   };
   handler: (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
+  /** The body system this organ belongs to (see docs/ANATOMY.md). */
+  system?: BodySystem;
   /** When true, the agent must get explicit human consent before executing (when a consent channel is active). */
   consequential?: boolean;
+  /**
+   * Fail-closed consequential action. When true, the tool is externally visible,
+   * irreversible, or otherwise too consequential to ever auto-fire silently.
+   * Unlike a plain `consequential` tool (which auto-approves when the human is
+   * physically present with no consent channel active), a `failClosed` tool
+   * REQUIRES an explicit approval channel: if none is active, it refuses with a
+   * clear error instead of running. Prevents hair-trigger external writes
+   * (posts, emails, messages) during unattended scheduled runs.
+   */
+  failClosed?: boolean;
 }
 
 export interface ToolContext {

@@ -4,6 +4,7 @@ export function memoryTools(): ToolDefinition[] {
   return [
     {
       name: 'remember',
+      system: 'memory',
       description:
         'Store a durable fact about the user or their world (preferences, names, appointments, decisions). The fact is remembered across sessions.',
       inputSchema: {
@@ -23,6 +24,7 @@ export function memoryTools(): ToolDefinition[] {
     },
     {
       name: 'recall',
+      system: 'memory',
       description:
         'Search remembered facts semantically. Use when the user references something from their past, preferences, or prior conversations.',
       inputSchema: {
@@ -42,12 +44,14 @@ export function memoryTools(): ToolDefinition[] {
     },
     {
       name: 'list_facts',
+      system: 'memory',
       description: 'List all facts currently remembered by the agent.',
       inputSchema: { type: 'object', properties: {} },
       handler: async (_args, ctx) => ctx.memory.listFacts(),
     },
     {
       name: 'delete_fact',
+      system: 'memory',
       description: 'Delete a remembered fact by its id.',
       inputSchema: {
         type: 'object',

@@ -68,3 +68,26 @@ test('recentContext caps the number of retained turns', () => {
   assert.match(out, /USER: u:msg-199/);
   assert.ok(!/USER: u:msg-0/.test(out));
 });
+
+test('recentContext never splits a surrogate pair when truncating', () => {
+  // 🔥 (U+1F525) is a surrogate pair — a lone half is invalid JSON (DeepSeek
+  // rejects it with "unexpected end of hex escape"). Put an emoji exactly at
+  // the truncation boundary and long enough to force the head+tail slice.
+  const long = 'start ' + '🔥'.repeat(300) + ' end question?';
+  const out = recentContext([a(long)], RECENT_WINDOW_MS, 0);
+  for (let i = 0; i < out.length; i++) {
+    const code = out.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = out.charCodeAt(i + 1);
+      assert.ok(
+        next >= 0xdc00 && next <= 0xdfff,
+        'no dangling high surrogate at index ' + i,
+      );
+    }
+  }
+  // And the truncated output must remain valid JSON when stringified (a lone
+  // surrogate would make JSON.stringify emit a malformed \u escape).
+  assert.doesNotThrow(() => JSON.parse(JSON.stringify(out)));
+  assert.match(out, /end question\?/, 'tail survives');
+});
+

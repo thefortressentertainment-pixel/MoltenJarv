@@ -63,6 +63,7 @@ export function codeTools(): ToolDefinition[] {
   return [
     {
       name: 'code_search',
+      system: 'sense',
       description:
         'Search a codebase for a text or regex pattern, returning file:line matches. Skips node_modules, .git, dist, build/target dirs, and binary files. Use to find where things are defined or referenced before editing.',
       inputSchema: {
@@ -114,6 +115,7 @@ export function codeTools(): ToolDefinition[] {
     },
     {
       name: 'code_edit',
+      system: 'effector',
       description:
         'Make ONE precise, verified edit to a file: find an exact string and replace it. The string must appear exactly once, otherwise it refuses (no guesswork, no accidental multi-edit). Path may be absolute or relative to the repo (/Users/tfe/jarv-genie). Returns the affected line before/after. Use for small surgical changes; run self_review after to verify.',
       inputSchema: {

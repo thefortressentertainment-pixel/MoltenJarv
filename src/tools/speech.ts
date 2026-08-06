@@ -5,6 +5,7 @@ export function speechTools(): ToolDefinition[] {
   return [
     {
       name: 'speak_text',
+      system: 'voice',
       description:
         'Speak a short message aloud on the hub machine using the text-to-speech engine. Use for reminders, hands-free replies, or when the user asked you to speak.',
       inputSchema: {

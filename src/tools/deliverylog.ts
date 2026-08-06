@@ -239,6 +239,7 @@ export function deliveryLogTools(): ToolDefinition[] {
   return [
     {
       name: 'log_delivery',
+      system: 'immune',
       description:
         'Append a timestamped, hash-chained entry to the Delivery Track Record (track-record/delivery-log.md). Use AFTER any shipped task — an investor digest run, ai-papers briefs, a system op, a Moltbook/social post, or anything delivered. Category must be one of: ' +
         ALLOWED.join(', ') +
@@ -265,6 +266,7 @@ export function deliveryLogTools(): ToolDefinition[] {
     },
     {
       name: 'deliverylog_verify',
+      system: 'immune',
       description:
         'Recompute the SHA-256 hash chain over the Delivery Track Record and report whether it is intact, the current chain root, and a publishable attestation. Read-only. Use before sharing or posting the record on Moltbook, or to prove a delivery claim.',
       inputSchema: { type: 'object', properties: {} },

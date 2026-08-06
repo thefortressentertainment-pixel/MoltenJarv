@@ -1,14 +1,17 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { ToolContext } from '../agent/types.js';
 import type { JarvGenieConfig } from '../config/index.js';
 import { resolveApiKey } from '../config/index.js';
+import { dataHome } from '../config/defaults.js';
 
 const execFileAsync = promisify(execFile);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export interface ComputerConfig {
   /** Allow control actions (AppleScript/System Events) — requires Accessibility permission. */
@@ -17,10 +20,14 @@ export interface ComputerConfig {
   visionModel?: string;
   /** Vision endpoint (OpenAI-compatible). Default: the primary endpoint. */
   visionEndpoint?: string;
+  /** Secret-store key for the vision API. Default: the primary provider's key. */
+  visionApiKeyEnv?: string;
   /** Vision model used for camera captures. Default: visionModel. */
   cameraModel?: string;
   /** Vision endpoint used for camera captures. Default: visionEndpoint. */
   cameraEndpoint?: string;
+  /** Secret-store key for camera captures. Default: visionApiKeyEnv. */
+  cameraApiKeyEnv?: string;
 }
 
 export function computerStatus(config?: JarvGenieConfig): { implemented: boolean; note: string } {
@@ -36,6 +43,38 @@ export function computerStatus(config?: JarvGenieConfig): { implemented: boolean
 export async function screenshot(file: string): Promise<void> {
   if (process.platform !== 'darwin') throw new Error('screenshot requires macOS');
   await execFileAsync('screencapture', ['-x', file]);
+}
+
+// On-device screen-text reading. macOS ships a Vision-framework OCR binary (no
+// model download, ~no RAM), compiled once from scripts/screen_ocr.swift into
+// ~/.jarv-genie/bin. This is the zero-footprint way for Jarv to "read" a
+// webpage or screen on a small machine.
+const OCR_BIN = path.join(dataHome(), 'bin', 'screen_ocr');
+const OCR_SRC = path.join(__dirname, '..', '..', 'scripts', 'screen_ocr.swift');
+
+async function ensureOcrBinary(): Promise<string | null> {
+  if (existsSync(OCR_BIN)) return OCR_BIN;
+  try {
+    await fs.mkdir(path.dirname(OCR_BIN), { recursive: true });
+    await execFileAsync('swiftc', ['-O', OCR_SRC, '-o', OCR_BIN], { timeout: 120_000 });
+    return OCR_BIN;
+  } catch {
+    return null;
+  }
+}
+
+/** Read the text visible in an image via macOS Vision OCR. Pure on-device. */
+export async function extractScreenText(file: string): Promise<{ ok: boolean; text: string; error?: string }> {
+  const bin = await ensureOcrBinary();
+  try {
+    const res = bin
+      ? await execFileAsync(bin, [file], { timeout: 30_000, maxBuffer: 4 * 1024 * 1024 })
+      : await execFileAsync('swift', [OCR_SRC, file], { timeout: 60_000, maxBuffer: 4 * 1024 * 1024 });
+    const text = res.stdout.trim();
+    return { ok: text.length > 0, text };
+  } catch (err) {
+    return { ok: false, text: '', error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 /** Describe what is on the screen using a vision-capable model. */
@@ -55,6 +94,8 @@ export interface DescribeImageOptions {
   model?: string;
   /** Endpoint override (default: configured vision/camera endpoint). */
   endpoint?: string;
+  /** Secret-store key name for the API (default: visionApiKeyEnv, else primary key). */
+  apiKeyEnv?: string;
   /** Prompt used when no question is given. */
   defaultPrompt?: string;
 }
@@ -62,9 +103,13 @@ export interface DescribeImageOptions {
 /** Describe any image (screen grab or camera frame) using a vision-capable model. */
 export async function describeImage(file: string, config: JarvGenieConfig, opts: DescribeImageOptions = {}): Promise<string> {
   const primary = config.providers.primary;
+  const comp = (config as unknown as { computer?: ComputerConfig }).computer ?? {};
   const baseUrl = opts.endpoint ?? primary.baseUrl ?? 'http://127.0.0.1:11434/v1';
   const model = opts.model ?? 'llama3.2-vision';
-  const key = resolveApiKey(primary) ?? 'not-set';
+  // The vision provider usually has its own key (e.g. Groq), so resolve it from
+  // computer.visionApiKeyEnv before falling back to the primary provider's key.
+  const keyEnv = opts.apiKeyEnv ?? comp.visionApiKeyEnv ?? (baseUrl.includes('groq') ? 'GROQ_API_KEY' : undefined);
+  const key = (keyEnv ? resolveApiKey({ apiKeyEnv: keyEnv, model }) : resolveApiKey(primary)) ?? 'not-set';
   const b64 = await fs.readFile(file).then((b) => b.toString('base64'));
 
   const body = {

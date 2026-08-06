@@ -27,6 +27,7 @@ export function initiativeTools(): ToolDefinition[] {
   return [
     {
       name: 'initiative_propose',
+      system: 'autonomic',
       description:
         'Invent and record a new proactive idea/opportunity, and notify the owner on Telegram. Use when you spot something worth doing that the user did not ask for — an opportunity, an automation, an improvement, or a strategy tied to your capabilities. It is stored and surfaced for approval; it is NOT executed until approved.',
       inputSchema: {
@@ -56,6 +57,7 @@ export function initiativeTools(): ToolDefinition[] {
     },
     {
       name: 'initiative_list',
+      system: 'autonomic',
       description: 'List all tracked initiatives and their status. Read-only.',
       inputSchema: { type: 'object', properties: {} },
       handler: async () => {
@@ -65,6 +67,7 @@ export function initiativeTools(): ToolDefinition[] {
     },
     {
       name: 'initiative_status',
+      system: 'autonomic',
       description: 'Update an initiative’s status (proposed / approved / declined / in_progress / done). Use when the owner approves or declines, or when you start/finish one.',
       inputSchema: {
         type: 'object',

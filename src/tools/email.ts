@@ -10,6 +10,7 @@ export function emailTools(): ToolDefinition[] {
   return [
     {
       name: 'email_send',
+      system: 'integration',
       description:
         'Send an email. Requires SMTP settings in the secret store (SMTP_HOST, SMTP_USER, SMTP_PASS). Use for web sign-ups, notifications, or anything that needs an outgoing message.',
       inputSchema: {
@@ -22,6 +23,7 @@ export function emailTools(): ToolDefinition[] {
         required: ['to', 'subject', 'text'],
       },
       consequential: true,
+      failClosed: true,
       handler: async (args) => {
         const to = String(args.to ?? '').trim();
         const subject = String(args.subject ?? '').trim();
@@ -32,6 +34,7 @@ export function emailTools(): ToolDefinition[] {
     },
     {
       name: 'email_read',
+      system: 'integration',
       description:
         'Read recent messages from a mailbox (default INBOX). Requires IMAP settings in the secret store (IMAP_HOST, IMAP_USER, IMAP_PASS). Returns sender, subject, date, flags, and a snippet.',
       inputSchema: {

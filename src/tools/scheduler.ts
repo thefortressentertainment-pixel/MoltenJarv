@@ -12,6 +12,7 @@ export function schedulerTools(): ToolDefinition[] {
   return [
     {
       name: 'schedule_add',
+      system: 'autonomic',
       description:
         'Create a recurring scheduled task that runs the agent at a cron time. Great for alarms, reminders, and briefings (e.g. "0 7 * * 6" = every Saturday 07:00). Pass --flags via notify/speak options. Returns the schedule id.',
       inputSchema: {
@@ -49,6 +50,7 @@ export function schedulerTools(): ToolDefinition[] {
     },
     {
       name: 'schedule_list',
+      system: 'autonomic',
       description: 'List all scheduled tasks with their cron and prompt.',
       inputSchema: { type: 'object', properties: {} },
       handler: async () => {
@@ -58,6 +60,7 @@ export function schedulerTools(): ToolDefinition[] {
     },
     {
       name: 'schedule_remove',
+      system: 'autonomic',
       description: 'Remove a scheduled task by its id (from schedule_add) or by its exact prompt text.',
       inputSchema: {
         type: 'object',

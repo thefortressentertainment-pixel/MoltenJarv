@@ -11,14 +11,17 @@ export function shutdownTools(): ToolDefinition[] {
   return [
     {
       name: 'shutdown_mac',
+      system: 'autonomic',
       description:
         'Power down the Mac completely. The most consequential action — only use when the owner explicitly asks Jarv to shut the machine down. Logs the request first so the next boot can verify it happened.',
       inputSchema: { type: 'object', properties: {} },
       consequential: true,
+      failClosed: true,
       handler: async () => powerDown('telegram'),
     },
     {
       name: 'shutdown_status',
+      system: 'sense',
       description:
         'Check the shutdown log and verify whether the last requested shutdown actually powered the Mac off (by comparing the request time to the current boot time). Use this to confirm, never assume.',
       inputSchema: { type: 'object', properties: {} },

@@ -185,6 +185,7 @@ export function appsTools(): ToolDefinition[] {
   return [
     {
       name: 'app_command',
+      system: 'effector',
       description:
         `Drive an app or the system with one curated command — the manual actions a person would take. Apps: ${ALL_APPS}. Every app supports open and quit. ` +
         'Spotify/Music: play (uri), playPause, next, prev. Notes: newNote. Messages: send. Safari/Chrome: openUrl, newTab, back, forward. Calendar: addEvent (title, date). ' +
@@ -262,6 +263,7 @@ export function appsTools(): ToolDefinition[] {
     },
     {
       name: 'app_status',
+      system: 'sense',
       description:
         'Read-only status. For an app: running + player state/track (Spotify/Music). For system: Wi-Fi on/off, Bluetooth on/off, and volume. Never prompts for consent.',
       inputSchema: {
@@ -308,6 +310,7 @@ export function appsTools(): ToolDefinition[] {
     },
     {
       name: 'process_list',
+      system: 'sense',
       description: 'Read-only: list the GUI applications currently running on the Mac, so you know what is open.',
       inputSchema: { type: 'object', properties: {} },
       handler: async () => {

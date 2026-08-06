@@ -74,6 +74,7 @@ export function uiTools(): ToolDefinition[] {
   return [
     {
       name: 'ui_activate',
+      system: 'effector',
       description:
         'Bring an app to the front (activate it) on the Mac. Use before clicking or typing in it. Example: "Clock".',
       inputSchema: {
@@ -97,6 +98,7 @@ export function uiTools(): ToolDefinition[] {
     },
     {
       name: 'ui_quit',
+      system: 'effector',
       description:
         'Quit (close) an app on the Mac by name, e.g. ui_quit(app: "Spotify"). Reliable way to close apps; use this instead of clicking close buttons.',
       inputSchema: {
@@ -120,6 +122,7 @@ export function uiTools(): ToolDefinition[] {
     },
     {
       name: 'ui_click',
+      system: 'effector',
       description:
         'Click a button in the front window of an app on the Mac. The app must be activated first. Example: button "Alarms" in Clock. Returns an error if the button does not exist.',
       inputSchema: {
@@ -152,6 +155,7 @@ export function uiTools(): ToolDefinition[] {
     },
     {
       name: 'ui_type',
+      system: 'effector',
       description:
         'Type text into the currently frontmost app on the Mac (as if typing on the keyboard). Use after ui_activate.',
       inputSchema: {
@@ -175,6 +179,7 @@ export function uiTools(): ToolDefinition[] {
     },
     {
       name: 'ui_key',
+      system: 'effector',
       description:
         'Send a keyboard shortcut to the frontmost app. Examples: "cmd+s", "enter", "escape", "tab", "cmd+shift+p".',
       inputSchema: {
@@ -200,6 +205,7 @@ export function uiTools(): ToolDefinition[] {
     },
     {
       name: 'ui_get_windows',
+      system: 'sense',
       description: 'List the open windows of an app on the Mac, so Jarv can see what is on screen before clicking.',
       inputSchema: {
         type: 'object',

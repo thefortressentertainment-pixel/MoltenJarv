@@ -27,7 +27,11 @@ export async function runAgentSchedule(cfg: AgentConfig, backend: ChatBackend): 
   }
   const state = loadAgentState();
   const now = new Date();
-  const minuteKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()} ${now.getHours()}:${now.getMinutes()}`;
+  // Zero-pad month/day so the key round-trips through `new Date()` correctly.
+  // (getMonth() is 0-indexed — writing it bare produced "2026-7-5" which
+  // `new Date()` read back as *July* 5, making every schedule look "missed".)
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  const minuteKey = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
     const done: string[] = [];
 
   for (const s of cfg.schedules) {

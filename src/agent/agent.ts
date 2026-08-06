@@ -1,10 +1,11 @@
 import type { JarvGenieConfig } from '../config/index.js';
 import { loadSoul, composeSystemPrompt } from '../config/soul.js';
-import { approvalActive, requireApproval, approvalQuestion } from '../approvals.js';
+import { approvalActive, requireApproval, requireFailClosedApproval, approvalQuestion } from '../approvals.js';
 import type { ModelRouter } from '../providers/index.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ChatMessage, MemoryService, ToolCall, ToolContext } from './types.js';
 import { composeRecentContextBlock } from './recentContext.js';
+import { reflex } from '../reflexes.js';
 
 /** Parse tool invocations written as text, e.g. `schedule_add --cron "0 7 * * 6" --prompt "x"`. */
 export function extractTextToolCalls(text: string, toolNames: string[]): Array<{ name: string; args: Record<string, unknown> }> {
@@ -193,6 +194,17 @@ export class Agent {
 
   /** Run one tool call with the consent gate. Returns true if the call errored. */
   private async executeCall(call: ToolCall, messages: ChatMessage[], ctx: ToolContext, toolNames: string[]): Promise<boolean> {
+    // Spinal cord: deterministic immune reflexes fire before any deliberation.
+    const spinal = reflex(call);
+    if (spinal.kind === 'blocked') {
+      messages.push({
+        role: 'tool',
+        toolCallId: call.id,
+        name: call.name,
+        content: JSON.stringify({ error: spinal.reason ?? 'blocked by reflex' }),
+      });
+      return true;
+    }
     if (!toolNames.includes(call.name)) {
       messages.push({
         role: 'tool',
@@ -205,8 +217,20 @@ export class Agent {
       return true;
     }
     const def = this.opts.tools.list().find((t) => t.name === call.name);
-    if (def?.consequential && approvalActive()) {
-      const approved = await requireApproval(approvalQuestion(call.name, call.arguments));
+    if (def?.consequential) {
+      // Fail-closed actions require an explicit consent channel and NEVER
+      // auto-approve — even when the human is physically present. This prevents
+      // externally visible writes (posts, emails, messages) from firing
+      // silently during unattended runs.
+      const question = approvalQuestion(call.name, call.arguments);
+      let approved: boolean;
+      if (def.failClosed) {
+        approved = await requireFailClosedApproval(question);
+      } else if (approvalActive()) {
+        approved = await requireApproval(question);
+      } else {
+        approved = true; // local, reversible, human present — existing fail-open default
+      }
       if (!approved) {
         messages.push({
           role: 'tool',

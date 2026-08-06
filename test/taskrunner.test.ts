@@ -126,6 +126,54 @@ test('empty model output is nudged to respond', async () => {
   assert.strictEqual(res.text, 'There now.');
 });
 
+test('fail-closed tool with no consent channel is refused, and its result reports the refusal honestly', async () => {
+  setApprovalHandler(null);
+  const defs = [
+    {
+      name: 'publish_post',
+      description: 'post publicly',
+      consequential: true,
+      failClosed: true,
+      inputSchema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] },
+    },
+    { name: 'get_datetime', description: 'current time', consequential: false, inputSchema: { type: 'object', properties: {} } },
+  ];
+  const executed: string[] = [];
+  const tools = {
+    list: () => defs,
+    has: (n: string) => defs.some((d) => d.name === n),
+    execute: async (name: string, args: Record<string, unknown>) => {
+      executed.push(`${name}:${JSON.stringify(args)}`);
+      return { ok: true, result: { posted: true } };
+    },
+  };
+  const { router } = fakeRouter([
+    { calls: [{ id: '1', name: 'publish_post', arguments: { title: 'hello' } }] },
+    { content: 'It was blocked — it cannot run without your approval.' },
+  ]);
+  const memory = { sessionLoad: async () => [], sessionAppend: async () => {}, sessionReset: async () => {} };
+  const runner = new TaskRunner({
+    router: router as never,
+    tools: tools as never,
+    memory: memory as never,
+    config: { agent: { systemPrompt: 'sys', maxSteps: 5, workdir: '/tmp' } } as never,
+  });
+  const res = await runner.run('publish a post');
+  assert.deepStrictEqual(executed, [], 'fail-closed tool must never run without a consent channel');
+  assert.match(res.text, /blocked|approv/i);
+});
+
+test('fail-open consequential tool still runs when no consent channel is active', async () => {
+  setApprovalHandler(null);
+  const { runner, executed } = build([
+    { calls: [{ id: '1', name: 'set_alarm', arguments: { cron: '0 8 * * 6', prompt: 'alarm' } }] },
+    { content: 'Alarm set.' },
+  ]);
+  const res = await runner.run('set an alarm');
+  assert.strictEqual(executed.length, 1, 'fail-open consequential tools run when the human is present locally');
+  assert.strictEqual(res.text, 'Alarm set.');
+});
+
 test('a round of multiple consequential tools gets ONE batched approval', async () => {
   let approvals = 0;
   setApprovalHandler(async () => {

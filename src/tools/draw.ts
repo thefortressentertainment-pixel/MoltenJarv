@@ -66,6 +66,7 @@ export function drawTools(): ToolDefinition[] {
   return [
     {
       name: 'draw_shape',
+      system: 'effector',
       description:
         'Draw a shape as an image and open it on the Mac so the user can see it. Shapes: square, rectangle, circle, triangle, text. Use when the user asks you to draw something. Opens the image in Preview (or the app you name).',
       inputSchema: {

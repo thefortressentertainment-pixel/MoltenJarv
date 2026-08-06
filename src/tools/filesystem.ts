@@ -17,6 +17,7 @@ export function fileTools(): ToolDefinition[] {
   return [
     {
       name: 'file_read',
+      system: 'effector',
       description: 'Read a text file from the workspace as UTF-8. Returns the size and content.',
       inputSchema: {
         type: 'object',
@@ -31,6 +32,7 @@ export function fileTools(): ToolDefinition[] {
     },
     {
       name: 'file_write',
+      system: 'effector',
       description: 'Write UTF-8 text to a file in the workspace, creating parent directories as needed.',
       inputSchema: {
         type: 'object',
@@ -50,6 +52,7 @@ export function fileTools(): ToolDefinition[] {
     },
     {
       name: 'file_list',
+      system: 'effector',
       description: 'List the entries of a directory in the workspace.',
       inputSchema: {
         type: 'object',
@@ -70,6 +73,7 @@ export function fileTools(): ToolDefinition[] {
     },
     {
       name: 'file_delete',
+      system: 'effector',
       description: 'Delete a file or empty directory from the workspace.',
       inputSchema: {
         type: 'object',

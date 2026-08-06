@@ -12,6 +12,7 @@ export function webTools(): ToolDefinition[] {
   return [
     {
       name: 'web_search',
+      system: 'integration',
       description:
         'Search the web and return a list of results with title, url, and snippet. Best-effort, no API key needed. Use for current events, facts, and anything outside the user\'s local data.',
       inputSchema: {
@@ -31,6 +32,7 @@ export function webTools(): ToolDefinition[] {
     },
     {
       name: 'web_read',
+      system: 'integration',
       description:
         'Fetch a URL and return its content as clean, readable text (via Jina Reader, no API key). Use to read a specific page, article, or result found with web_search.',
       inputSchema: {

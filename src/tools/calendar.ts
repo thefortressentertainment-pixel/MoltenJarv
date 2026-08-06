@@ -5,6 +5,7 @@ export function calendarTools(): ToolDefinition[] {
   return [
     {
       name: 'calendar_agenda',
+      system: 'integration',
       description:
         "List calendar events in the macOS Calendar app for the next N days (default 1 = today). Returns start time, summary, and location for each event. Read-only. Use to know the user's schedule. Requires computer.allowControl=true.",
       inputSchema: {
@@ -29,6 +30,7 @@ export function calendarTools(): ToolDefinition[] {
     },
     {
       name: 'calendar_add',
+      system: 'integration',
       description:
         'Create an event in the macOS Calendar app. Provide a title, start (ISO 8601, e.g. "2026-08-05T14:00:00"), optional end, optional location, and optional calendar name. Requires computer.allowControl=true.',
       inputSchema: {

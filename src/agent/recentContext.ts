@@ -44,9 +44,25 @@ function isToolRole(m: ChatMessage): boolean {
 }
 
 /**
- * Build a compact excerpt of the last `windowMs` of conversational turns.
- * The order returned is oldest→newest so it reads like a thread.
+ * Slice a string without splitting a UTF-16 surrogate pair. Cutting mid-emoji
+ * leaves a lone surrogate that JSON.stringify encodes as a bare \uD83D-style
+ * escape, which strict model endpoints (e.g. DeepSeek) reject as invalid JSON.
  */
+function safeSlice(text: string, start: number, end?: number): string {
+  let s = end === undefined ? text.slice(start) : text.slice(start, end);
+  if (s.length === 0) return s;
+  const first = s.charCodeAt(0);
+  if (first >= 0xdc00 && first <= 0xdfff && (end === undefined ? start > 0 : start !== 0)) {
+    s = s.slice(1);
+  }
+  if (s.length > 0) {
+    const last = s.charCodeAt(s.length - 1);
+    if (last >= 0xd800 && last <= 0xdbff) s = s.slice(0, -1);
+  }
+  return s;
+}
+
+/** Build a compact excerpt of the last `windowMs` of conversational turns. */
 export function recentContext(
   history: ChatMessage[],
   windowMs: number = RECENT_WINDOW_MS,
@@ -81,13 +97,13 @@ export function recentContext(
     let text = (m.content ?? '').trim();
     // Tool payloads are noisy; reduce to a one-line hint.
     if (isToolRole(m)) {
-      text = text.length > 120 ? text.slice(0, 120) + '…' : text;
+      text = text.length > 120 ? safeSlice(text, 0, 120) + '…' : text;
     } else if (text.length > MAX_CONTENT_CHARS) {
       // Long turns usually carry the point at the END (a question Jarv just
       // asked, the answer, the request). Keep both the head and the tail so
       // the terse "yes"/"no" reply that follows is never contextless.
       const keep = Math.floor(MAX_CONTENT_CHARS / 2);
-      text = text.slice(0, keep) + '…' + text.slice(-keep);
+      text = safeSlice(text, 0, keep) + '…' + safeSlice(text, -keep);
     }
     return `${label}: ${text}`;
   });

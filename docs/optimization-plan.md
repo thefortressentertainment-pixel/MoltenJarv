@@ -3,7 +3,7 @@
 <!-- NOTE: This file is managed by Jarv Genie. Optimization items are tracked here and reviewed via self_review. -->
 
 <!-- Self-optimization plan for Jarv Genie. The soul is injected into the system prompt at src/agent/agent.ts:68 via composeSystemPrompt (src/config/soul.ts:60). -->
-<!-- Reviewed 2026-08-04 by Jarv Genie. -->
+<!-- Reviewed 2026-08-05 by Jarv Genie. -->
 # Jarv Genie — Self-Optimization Plan
 
 Goal: Jarv can do anything the user can do on this Mac, from anywhere, with
@@ -41,6 +41,30 @@ Status of each item: `[x]` done, `[ ]` open.
       health + the top next optimization to the owner on Telegram. VSCodium
       deliberation stays on-demand (auto-opening it daily is a nuisance).
 
+## Hardening: no more crash-loops (implemented 2026-08-05)
+
+Root cause of the 2026-08-05 meltdown: `com.fortress.jarvgenie-heartbeat.plist`
+has `KeepAlive=true`, so a single unhandled throw in the agent daemon caused
+`process.exit(1)` and launchd respawned it instantly — an infinite hot loop that
+took the machine (and manual effort) to break. Five fixes now prevent this class
+of failure entirely:
+
+1. **Crash-loop breaker** (`src/scheduler/index.ts`): the daemon persists
+   consecutive-crash counts and backs off exponentially (30s → … → 10 min cap)
+   instead of spinning. A clean run resets the count.
+2. **Dead-owner lock recovery** (`src/resource.ts`): a busy-lock left by a
+   crashed task is auto-detected (owner PID no longer alive) and released, so a
+   crash can't starve the heartbeat or schedule forever.
+3. **Honest lock acquire** (`src/resource.ts`): `tryAcquireBusy` returns `false`
+   on a write failure instead of pretending it acquired the lock (prevented a
+   race where two processes both thought they held it).
+4. **Tick isolation** (`src/index.ts`): each daemon tick is fully wrapped in
+   try/catch, so a single bad schedule/backend call can never bubble out of the
+   daemon and trigger an exit(1) crash-loop.
+5. **Service hardening** (`scripts/install-services.sh`): the heartbeat service
+   now has a 300s launchd `ThrottleInterval` (up from 60s) as launchd's own floor
+   on respawn rate, complemented by the in-code breaker.
+
 ## Process
 
 Deliberation happens in VSCodium (`/Users/tfe/jarv-genie`) on demand. Jarv reads
@@ -49,8 +73,13 @@ it; runs `self_review`; and reports back. Iterate.
 
 ## Current health
 
-- Tests: 119 passing
+- Tests: 176 (175 passing, 0 failing)
+- Typecheck: clean
 - Model: deepseek-chat (primary) / qwen2.5:3b (local fallback)
 - Tools: 53; consent gate armed via Telegram (@MoltenJarvbot)
 - Services: hub (always-on, 0.0.0.0), heartbeat (schedules), telegram bridge
   (keep-awake), keepawake — all with full PATH via launchd
+- Hardening: crash-loop breaker + dead-lock recovery + tick isolation + service
+  throttle (see above)
+- Deliveries: Delivery Track Record maintained (SHA-256 hash chain), verifiable
+  via deliverylog_verify

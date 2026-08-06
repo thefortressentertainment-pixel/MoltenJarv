@@ -39,6 +39,7 @@ export function briefingTools(): ToolDefinition[] {
   return [
     {
       name: 'daily_briefing',
+      system: 'integration',
       description:
         "Assemble the user's morning briefing: current time, today's calendar agenda, open reminders, and machine status (battery, disk, network). Use when the user asks for a briefing, a summary of their day, or 'what's going on'. Every section degrades gracefully if a permission is missing.",
       inputSchema: {

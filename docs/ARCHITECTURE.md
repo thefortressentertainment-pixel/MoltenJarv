@@ -1,30 +1,43 @@
 # Architecture
 
+Jarv is architected as a living system — a body plan, not a flat pile of
+features. Every component maps to an organ. See
+[`docs/ANATOMY.md`](ANATOMY.md) for the full body map (nervous system, senses,
+organs, limbs, immune system, the soul). The high-level shape:
+
 ```
                     ┌─────────────────────────────────────────────┐
-                    │                 Interfaces                  │
-                    │   REPL · one-shot · MCP server · doctor     │
-                    └─────────────────────────────────────────────┘
-                                       │
-                    ┌──────────────────▼──────────────────────────┐
-                    │                    Agent                     │
+                    │     LIMBIC SYSTEM / SOUL  (SOUL.md)         │
+                    │   identity · instincts · moral anchors      │
+                    └───────────────────┬─────────────────────────┘
+                                        │
+                    ┌───────────────────▼─────────────────────────┐
+                    │          NEOCORTEX (conscious reason)       │
                     │   system prompt + history + tools           │
                     │   loop: plan → call tools → observe → reply │
-                    └──────────────────┬──────────────────────────┘
-                                       │
-              ┌────────────────────────┼─────────────────────────┐
-              │                        │                         │
-   ┌──────────▼──────────┐  ┌──────────▼──────────┐  ┌──────────▼──────────┐
-   │    Model Router     │  │    Tool Registry    │  │       Memory        │
-   │ primary → fallback  │  │ built-in + external │  │ facts · sessions    │
-   │ (local-first)       │  │ MCP server tools    │  │ embeddings · search │
-   └──────────┬──────────┘  └──────────┬──────────┘  └──────────┬──────────┘
-              │                        │                        │
-   ┌──────────▼──────────┐  ┌──────────▼──────────┐  ┌──────────▼──────────┐
-   │  OpenAI-compatible  │  │        MCP          │  │   local disk        │
-   │  providers          │  │ server (stdio/http) │  │ ~/.jarv-genie/      │
-   │  (cloud + Ollama)   │  │ client (external)   │  │ facts.json · .jsonl │
-   └─────────────────────┘  └─────────────────────┘  └─────────────────────┘
+                    └───────┬───────────────────────┬─────────────┘
+                            │                       │
+              ┌─────────────▼───────────┐   ┌───────▼──────────────┐
+              │ SPINAL CORD (reflexes)  │   │  PERIPHERAL NERVES   │
+              │  hard blocks + fast     │   │   Tool Registry      │
+              │  path, pre-cortex       │   │   dispatch           │
+              └─────────────┬───────────┘   └───────┬──────────────┘
+                            │                       │
+        ┌───────────────────▼───────────────────────▼─────────────┐
+        │          AUTONOMIC NERVOUS SYSTEM                       │
+        │   sense() vitals · regulate() → clean/compact/backoff   │
+        └────────────┬──────────────────────────────┬─────────────┘
+                     │                              │
+   ┌─────────────────▼──────────┐   ┌───────────────▼───────────┐
+   │  SENSES · ORGANS · LIMBS   │   │   Model Router            │
+   │  eyes ears hands memory    │   │   primary → fallback      │
+   │  immune barrier            │   │   (local-first)           │
+   └────────────────────────────┘   └───────────────┬───────────┘
+                                                    │
+                     ┌──────────────────────────────▼───────────┐
+                     │  OpenAI-compatible providers + MCP        │
+                     │  (cloud + Ollama) · MCP server/client     │
+                     └──────────────────────────────────────────┘
 ```
 
 ## Modules
@@ -40,6 +53,12 @@
 | `src/cli` | Interactive REPL, one-shot mode, doctor. |
 | `src/index.ts` | Entry point: argument parsing and mode dispatch. |
 | `src/voice`, `src/computer` | Stubs for the planned voice and computer-use interfaces. |
+| `src/resource.ts` | The **autonomic nervous system** — `sense()` vitals and `regulate()` (cleanup, compaction, backoff). |
+| `src/agent/taskrunner.ts` | The **neocortex + spinal cord** — planning loop with a reflex layer (hard blocks, fast path) before each model call. |
+
+> **Body plan:** every tool carries a `system` tag (`sense | effector | memory |
+> voice | autonomic | immune | integration`), and the registry exposes
+> `bySystem()`, `senses()`, `effectors()`, `organs()`. See `docs/ANATOMY.md`.
 
 ## Data flow
 

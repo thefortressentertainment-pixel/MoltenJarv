@@ -4,6 +4,7 @@ export function timeTools(): ToolDefinition[] {
   return [
     {
       name: 'get_datetime',
+      system: 'sense',
       description:
         "Get the current date, time, timezone, and weekday. Use this whenever the user references 'now', 'today', 'tomorrow', 'this morning', etc.",
       inputSchema: { type: 'object', properties: {} },
