@@ -2,8 +2,10 @@ import assert from 'node:assert';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
-import { tryAcquireBusy, releaseBusy, isBusy, freeMemoryPercent, sense, regulate, busyByOthers } from '../src/resource.js';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, statSync, readFileSync, utimesSync } from 'node:fs';
+
+const readFile = (p: string) => readFileSync(p, 'utf8');
+import { tryAcquireBusy, releaseBusy, isBusy, freeMemoryPercent, sense, regulate, busyByOthers, acquireTaskLease, LEASE_EXEMPT, TASK_LEASE_MAX_IDLE_MS } from '../src/resource.js';
 
 test('busy lock serializes: second acquirer is refused until release', () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'jarv-res-'));
@@ -105,4 +107,72 @@ test('autonomic regulate() blocks when memory is critically low', async () => {
   const vitals = { freeMemoryPercent: 4, contextUsage: 0.1, busy: false, freeDiskPercent: 80, sampledAt: Date.now() };
   const result = await regulate(vitals);
   assert.strictEqual(result, 'blocked');
+});
+
+test('task lease: second acquirer is refused while a live lease is fresh', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'jarv-lease-'));
+  const lock = path.join(dir, 'busy.lock');
+  try {
+    const a = acquireTaskLease(lock);
+    assert.strictEqual(a.held, true, 'first acquirer holds the lease');
+    const b = acquireTaskLease(lock);
+    assert.strictEqual(b.held, false, 'second acquirer is refused while held');
+    b.release();
+    a.heartbeat();
+    a.release();
+    assert.strictEqual(acquireTaskLease(lock).held, true, 're-acquirable after release');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('task lease: watchdog reclaims from a live-but-stale holder (past idle ceiling)', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'jarv-stale-'));
+  const lock = path.join(dir, 'busy.lock');
+  const { spawn } = await import('node:child_process');
+  const foreign = spawn('sleep', ['30'], { stdio: 'ignore' });
+  try {
+    // Simulate a foreign live process holding the lock but never heartbeating
+    // past the idle ceiling → the watchdog must take it back. Backdate the
+    // file's mtime because that IS the heartbeat freshness signal.
+    writeFileSync(lock, `${foreign.pid}:${Date.now()}`);
+    const past = new Date(Date.now() - TASK_LEASE_MAX_IDLE_MS - 1000);
+    utimesSync(lock, past, past);
+    const next = acquireTaskLease(lock);
+    assert.strictEqual(next.held, true, 'stale live-PID lease is reclaimed');
+    assert.strictEqual(next.reclaimed, true, 'reclaim is flagged');
+    next.release();
+  } finally {
+    foreign.kill();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('task lease: a fresh exempt lease (consent-gate wait) is NOT reclaimed', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'jarv-exempt-'));
+  const lock = path.join(dir, 'busy.lock');
+  try {
+    const exempt = acquireTaskLease(lock, { exempt: true });
+    assert.strictEqual(exempt.held, true);
+    // A claimant tries within the exempt window → refused (human still deciding).
+    const claimant = acquireTaskLease(lock);
+    assert.strictEqual(claimant.held, false, 'exempt wait is honored, not reclaimed');
+    exempt.release();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('task lease: lease file records an exempt reason tag', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'jarv-tag-'));
+  const lock = path.join(dir, 'busy.lock');
+  try {
+    const lease = acquireTaskLease(lock, { exempt: true });
+    assert.ok(lease.held);
+    const raw = readFile(lock);
+    assert.ok(raw.includes(':' + LEASE_EXEMPT), 'exempt reason is recorded in the lease file');
+    lease.release();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

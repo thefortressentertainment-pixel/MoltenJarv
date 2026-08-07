@@ -1,7 +1,15 @@
 import { spawn } from 'node:child_process';
 import { getSecretStore } from '../config/secrets.js';
 import { setApprovalHandler, setAutoApprove, isAutoApproving } from '../approvals.js';
-import { tryAcquireBusy, releaseBusy, sense, regulate } from '../resource.js';
+import {
+  acquireTaskLease,
+  tryAcquireBusy,
+  releaseBusy,
+  sense,
+  regulate,
+  TASK_LEASE_HEARTBEAT_MS,
+  type AcquiredLease,
+} from '../resource.js';
 import { TelegramClient, type TgUpdate } from '../telegram/client.js';
 import { TaskRunner } from '../agent/taskrunner.js';
 import type { AgentContext } from './index.js';
@@ -33,6 +41,50 @@ function verdict(text: string): boolean | null {
   return null;
 }
 
+const IMAGE_MIME = /^image\/(png|jpe?g|gif|webp)$/i;
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp)$/i;
+
+/**
+ * Detect an image in a Telegram update (photo or image document), download it
+ * to a temp file, and return an instruction for the agent to identify it with
+ * the vision tool. Returns null when the message has no usable image.
+ */
+async function captureAttachment(client: TelegramClient, u: TgUpdate): Promise<string | null> {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+
+  let fileId: string | undefined;
+  let ext = '.jpg';
+
+  // Photos arrive as an array of resolutions; take the largest.
+  const photo = u.message?.photo;
+  if (photo && photo.length > 0) {
+    const best = photo.reduce((a, b) => ((b?.file_size ?? 0) > (a?.file_size ?? 0) ? b : a));
+    fileId = best?.file_id;
+    ext = '.jpg';
+  } else if (u.message?.document) {
+    const mime = u.message.document.mime_type ?? '';
+    const fname = u.message.document.file_name ?? '';
+    if (IMAGE_MIME.test(mime) || IMAGE_EXT.test(fname)) {
+      fileId = u.message.document.file_id;
+      const m = fname.match(IMAGE_EXT);
+      ext = m ? m[0] : '.jpg';
+    }
+  }
+
+  if (!fileId) return null;
+
+  const { file_path } = await client.getFile(fileId);
+  const dest = path.join(os.tmpdir(), `jarv-incoming${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`);
+  await client.downloadFile(file_path, dest);
+
+  // Compose the instruction, preserving any caption text as the question.
+  const caption = (u.message?.caption ?? '').trim();
+  const question = caption ? `The user asked: "${caption}"` : 'Identify what is in this image';
+  return `[Image attached] ${question}. Use vision_identify with imagePath="${dest}".${caption ? '' : ' If the user included instructions, answer them too.'}`;
+}
+
 /** Telegram caps a message at 4096 chars — split longer text into chunks. */
 export function chunkText(text: string, max = 4000): string[] {
   const out: string[] = [];
@@ -46,6 +98,28 @@ export function chunkText(text: string, max = 4000): string[] {
   }
   if (rest) out.push(rest);
   return out;
+}
+
+/**
+ * Send long text in chunks (Telegram caps ~4096 chars) and return every
+ * sent message's descriptor so callers can identify the last one (e.g. the
+ * approval prompt, which a "reply to" can then target).
+ */
+async function chunkToMessages(
+  client: TelegramClient,
+  chatId: number | string,
+  text: string,
+): Promise<Array<{ result: { message_id: number } }>> {
+  const parts = chunkText(text);
+  const sent: Array<{ result: { message_id: number } }> = [];
+  for (const part of parts) {
+    try {
+      sent.push({ result: await client.sendMessage(chatId, part) });
+    } catch {
+      // A delivery failure shouldn't abort the whole reply; skip the chunk.
+    }
+  }
+  return sent;
 }
 
 function usage(): string {
@@ -105,6 +179,41 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
 
   let offset = 0;
   let pendingResolve: ((ok: boolean) => void) | null = null;
+  // The message_id of the pending approval, so a "reply to that message" is
+  // unmistakably a verdict, whereas an unrelated message is a new task.
+  let pendingApprovalMsgId: number | null = null;
+  // Shared busy-lease: the active task holds it while working; the approval
+  // wait releases it (so a new message can run) and re-acquires on resolve.
+  let taskLease: AcquiredLease | null = null;
+  // Heartbeat interval while a task is actively working.
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+  const stopHeartbeat = (): void => {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+  };
+
+  const startHeartbeat = (lease: AcquiredLease): void => {
+    stopHeartbeat();
+    heartbeatTimer = setInterval(() => {
+      try {
+        lease.heartbeat();
+      } catch {
+        /* the lease may have been released; ignore */
+      }
+    }, TASK_LEASE_HEARTBEAT_MS);
+  };
+
+  const releaseTaskLease = (): void => {
+    stopHeartbeat();
+    if (taskLease) {
+      taskLease.release();
+      taskLease = null;
+    }
+  };
+
   // When the owner replies "yes all", approve every remaining consequential
   // tool call for the current task without asking again. Reset per task.
   setAutoApprove(false);
@@ -116,23 +225,34 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
     process.stdout.write(`[jarv-genie] telegram approval requested: ${question.slice(0, 120)}\n`);
     const body = `🔒 Jarv wants approval for:\n\n${question}\n\nReply **yes** to allow, **no** to deny. Or **yes all** to allow every remaining step of this task without asking again.`;
     return (async () => {
-      for (const part of chunkText(body)) {
-        await client.sendMessage(ownerId, part);
-      }
-    })().then(
-      () =>
-        new Promise<boolean>((resolve) => {
-          const timer = setTimeout(() => {
-            pendingResolve = null;
-            client.sendMessage(ownerId, '⏰ No answer in time — assuming **no** for now. Re-ask and I\'ll retry.').catch(() => {});
-            resolve(false);
-          }, APPROVAL_TIMEOUT_MS);
-          pendingResolve = (ok) => {
-            clearTimeout(timer);
-            resolve(ok);
-          };
-        }),
-    );
+      // Hold onto the approval message id so a reply-to-targeted message can
+      // be matched as a verdict even if the owner also sends other messages.
+      const sent = await chunkToMessages(client, ownerId, body);
+      pendingApprovalMsgId = sent.at(-1)?.result?.message_id ?? null;
+      // While waiting on a human, release the busy-lease so the bot isn't
+      // wedged for the whole approval window: a new message can run, and the
+      // watchdog never mistakes an idle approval wait for a hung task.
+      releaseTaskLease();
+      return new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => {
+          pendingResolve = null;
+          pendingApprovalMsgId = null;
+          client.sendMessage(ownerId, '⏰ No answer in time — assuming **no** for now. Re-ask and I\'ll retry.').catch(() => {});
+          resolve(false);
+        }, APPROVAL_TIMEOUT_MS);
+        pendingResolve = (ok) => {
+          clearTimeout(timer);
+          pendingApprovalMsgId = null;
+          resolve(ok);
+        };
+      });
+    })().then((ok) => {
+      // Re-acquire an exempt lease before resuming the approved work, so the
+      // resumed task isn't starved by a newer message that grabbed the lock.
+      taskLease = acquireTaskLease({ exempt: true, maxIdleMs: APPROVAL_TIMEOUT_MS });
+      startHeartbeat(taskLease);
+      return ok;
+    });
   });
 
   // Serialize message processing so agent runs don't interleave, but keep
@@ -142,18 +262,20 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
   const processMessage = async (text: string): Promise<void> => {
     process.stdout.write(`[jarv-genie] telegram <- ${text.slice(0, 120)}\n`);
     setAutoApprove(false);
-    const acquired = tryAcquireBusy();
-    if (!acquired) {
-      // Another process (e.g. the scheduled heartbeat) is mid-task. The
-      // busy-lock serializes cross-process work — don't pile on.
+    // The active task holds a watcher-managed lease: it heartbeats while
+    // working and auto-reclaims from dead or stale owners. A consent-gate wait
+    // releases it (see the approval handler), so a new message can run here.
+    const lease = acquireTaskLease();
+    if (!lease.held) {
+      // Another process (e.g. the scheduled heartbeat) is mid-task. The lease
+      // serializes cross-process work — don't pile on.
       await client.sendMessage(chatId!, '🫀 Slightly overloaded right now — give me a minute, then try again.');
       return;
     }
+    if (lease.reclaimed) process.stdout.write('[jarv-genie] lease watchdog: reclaimed a stale/hung busy-lock\n');
+    taskLease = lease;
+    startHeartbeat(lease);
     try {
-      // Autonomic nervous system: sense vitals, then regulate (clean/compact/
-      // block) before the cortex does any work. Note: we already hold the busy
-      // lock, so vitals.busy will read true for our own lock — only memory and
-      // context matter here.
       const vitals = await sense();
       const guard = await regulate(vitals);
       if (guard === 'blocked') {
@@ -174,7 +296,7 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
         await client.sendMessage(chatId!, part);
       }
     } finally {
-      if (acquired) releaseBusy();
+      releaseTaskLease();
     }
   };
 
@@ -193,23 +315,58 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
         return;
       }
     }
-    if (!text) return;
+
+    // Handle image attachments (photos or image documents). Download the largest
+    // photo / file to disk, then hand the agent an instruction to identify it.
+    let caption = (text ?? '').trim();
+    const imgPrompt = await captureAttachment(client, u).catch((err) => {
+      process.stdout.write(`[jarv-genie] attachment download error: ${err instanceof Error ? err.message : String(err)}\n`);
+      return `⚠️ I couldn't download the attached image (${err instanceof Error ? err.message : String(err)}). Try sending it again.`;
+    });
+    if (imgPrompt) caption = imgPrompt;
+
+    if (!caption) return;
+
+    // Reply-to context: when the owner hits "reply" on a specific prior message,
+    // keep that frame as ambient context for this exchange. Cheap substring, one
+    // division — no extra model call.
+    const replyTo = u.message?.reply_to_message;
+    if (replyTo?.text || replyTo?.caption) {
+      const replied = (replyTo.text ?? replyTo.caption ?? '').trim();
+      if (replied && !caption.startsWith('[Image attached]')) {
+        caption = `(Replying to your message: "${replied.slice(0, 500)}") ${caption}`;
+      }
+    }
+
     if (pendingResolve) {
-      const v = verdict(text.trim());
+      const t = (text ?? '').trim();
+      // Conflict resolution: an unrelated message while an approval is pending
+      // is a NEW task, not a verdict. Only a clear yes/no (that isn't replying
+      // to some other message) or a reply to the approval prompt resolves it.
+      const isTargeted = replyTo != null && pendingApprovalMsgId != null && replyTo.message_id === pendingApprovalMsgId;
+      const plainVerdict = verdict(t) !== null || AUTO_APPROVE_RE.test(t);
+      const looksLikeVerdict = isTargeted || (plainVerdict && !replyTo);
+      if (!looksLikeVerdict) {
+        // Not a verdict — run it as a new task and keep the approval pending.
+        process.stdout.write(`[jarv-genie] telegram conflict: {@${me.username}} pending approval, running new message as a task\n`);
+        chain = chain.then(() => processMessage(caption));
+        return;
+      }
+      const v = verdict(t);
       const resolve = pendingResolve;
       pendingResolve = null;
-      if (AUTO_APPROVE_RE.test(text.trim())) {
+      if (AUTO_APPROVE_RE.test(t)) {
         setAutoApprove(true);
         await client.sendMessage(from, '👍 Got it — approving this and every remaining step of the task.');
       }
       resolve(v ?? true);
       return;
     }
-    if (text === '/start' || text === '/help') {
+    if (caption === '/start' || caption === '/help') {
       await client.sendMessage(chatId!, 'Jarv Genie is here. Tell me what you need.');
       return;
     }
-    chain = chain.then(() => processMessage(text));
+    chain = chain.then(() => processMessage(caption));
   };
 
   for (;;) {

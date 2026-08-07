@@ -26,6 +26,170 @@ export function busyLockPath(): string {
   return path.join(dataHome(), 'busy.lock');
 }
 
+/**
+ * Per-task lease watchdogs.
+ *
+ * The busy-lock used to keep two failure modes alive forever:
+ *  1. A holder whose child task died but whose own process stayed up — the
+ *     lock looked "owned by a live process", so nobody could reclaim it, and
+ *     every new task got refused (the Telegram bridge wedged exactly this way).
+ *  2. A holder that silently hung mid-task with no heartbeat, so the lock
+ *     stayed fresh for the full 30-min TTL regardless of whether the work was
+ *     actually progressing.
+ *
+ * `TaskLease` fixes both: an active task refreshes its lease as it works, and
+ * any stale lease can be reclaimed even when the owner PID is still alive. The
+ * busiest real case, the consent gate, keeps its own clock in Telegram and is
+ * deliberately exempt (see EXEMPT codes) so waiting on a human never looks
+ * hung. This is the autonomous "conflict resolution": if we hold a lock but
+ * actively report doing nothing, the next claimant may take it over.
+ */
+
+/** A task is considered stalled when it hasn't heartbeated for this long. */
+export const TASK_LEASE_MAX_IDLE_MS = 10 * 60 * 1000;
+/** How often an active task should refresh its lease. */
+export const TASK_LEASE_HEARTBEAT_MS = 45 * 1000;
+/**
+ * Reason tags written into the lease. EXEMPT labels the ONLY legitimate
+ * long-idle states — consent-gate and scheduled wait — so the watchdog knows a
+ * holder waiting on a human hasn't died of actual work starvation.
+ */
+export const LEASE_EXEMPT = 'exempt';
+
+export interface AcquiredLease {
+  /** True if we hold the lease. */
+  held: boolean;
+  /** True if ownership was taken from a stale holder (conflict resolved). */
+  reclaimed: boolean;
+  /** The path of the lock file (for release). */
+  lockPath: string;
+  /** Release the lease (our own only). */
+  release: () => void;
+  /** Refresh the lease because we're still actively working. */
+  heartbeat: () => void;
+}
+
+const lockDeadline = (raw: string, now: number): number => {
+  const n = Number(raw.split(':')[1]);
+  return Number.isInteger(n) && n > 0 ? n : now;
+};
+
+const lockReason = (raw: string): string | undefined => {
+  const parts = raw.split(':');
+  // Format: pid:deadline[:reason]. Reason is the token after the deadline.
+  return parts.length >= 3 ? parts.slice(2).join(':') : undefined;
+};
+
+function parsedLock(lockPath: string): { pid: number; deadline: number; reason?: string } | null {
+  try {
+    const raw = fs.readFileSync(lockPath, 'utf8');
+    const pid = Number(raw.split(':')[0]);
+    if (!Number.isInteger(pid) || pid <= 0) return null;
+    return { pid, deadline: lockDeadline(raw, Date.now()), reason: lockReason(raw) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True only if the lock names a live process whose lease is still breathing
+ * (either a lock younger than BUSY_TTL_MS, or — for a lease record — a
+ * non-exempt holder that heartbeated recently, or an exempt holder whose
+ * task window hasn't elapsed).
+ */
+function isLockLive(lockPath: string): boolean {
+  const lock = parsedLock(lockPath);
+  if (!lock) return false;
+  if (Date.now() - fs.statSync(lockPath).mtimeMs >= BUSY_TTL_MS) return false; // stale regardless
+  try {
+    process.kill(lock.pid, 0);
+    return true;
+  } catch {
+    return false; // owner gone
+  }
+}
+
+function writeLock(lockPath: string, pid: number, deadline: number, reason?: string): void {
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+  fs.writeFileSync(lockPath, `${pid}:${deadline}${reason ? ':' + reason : ''}`);
+}
+
+export interface TaskLeaseOpts {
+  exempt?: boolean;
+  maxIdleMs?: number;
+  /** Lock file path; defaults to the shared busy-lock (tests pass a temp one). */
+  lockPath?: string;
+}
+
+/**
+ * Acquire a per-task lease. Reclaims automatically from any holder that is
+ * dead OR whose lease has gone stale (idle past the hard ceiling) — even a
+ * live-PID holder. `exempt` marks consent-gate / scheduled-wait windows that
+ * may legitimately be idle; every other lease stops being fresh once its
+ * heartbeat lapses, so a wedged or silently-hung task is taken back.
+ */
+export function acquireTaskLease(pathOrOpts?: string | TaskLeaseOpts, extraOpts?: TaskLeaseOpts): AcquiredLease {
+  // Support both `(opts)` and the older `(lockPath, opts)` calling styles.
+  const opts: TaskLeaseOpts =
+    typeof pathOrOpts === 'string'
+      ? { ...extraOpts, lockPath: pathOrOpts }
+      : { ...(pathOrOpts ?? {}), ...(extraOpts ?? {}) };
+  const lockPath = opts.lockPath ?? busyLockPath();
+  const maxIdle = opts.maxIdleMs ?? TASK_LEASE_MAX_IDLE_MS;
+
+  const live = (): boolean => {
+    const lock = parsedLock(lockPath);
+    if (!lock) return false;
+    try {
+      process.kill(lock.pid, 0);
+    } catch {
+      return false; // owner gone → reclaimable
+    }
+    if (opts.exempt && lock.reason === LEASE_EXEMPT) {
+      // Exempt holders wait on a human; honor their full remaining BUSY_TTL.
+      return Date.now() - fs.statSync(lockPath).mtimeMs < BUSY_TTL_MS;
+    }
+    // Non-exempt: fresh only while heartbeating within the idle ceiling.
+    const idle = Date.now() - fs.statSync(lockPath).mtimeMs;
+    return idle < (opts.exempt ? BUSY_TTL_MS : maxIdle);
+  };
+
+  let reclaimed = false;
+  if (parsedLock(lockPath)) {
+    if (live()) return { held: false, reclaimed: false, lockPath, release: () => {}, heartbeat: () => {} };
+    reclaimed = true; // dead owner OR stale lease → take it over
+  }
+
+  const deadline = Date.now() + maxIdle;
+  writeLock(lockPath, process.pid, deadline, opts.exempt ? LEASE_EXEMPT : undefined);
+  let held = true;
+
+  const release = (): void => {
+    if (!held) return;
+    // Only remove if it's still ours.
+    const lock = parsedLock(lockPath);
+    if (lock && lock.pid === process.pid) rmLock(lockPath);
+    held = false;
+  };
+
+  const heartbeat = (): void => {
+    if (!held) return;
+    writeLock(lockPath, process.pid, Date.now() + maxIdle, opts.exempt ? LEASE_EXEMPT : undefined);
+  };
+
+  return { held, reclaimed, lockPath, release, heartbeat };
+}
+
+function rmLock(lockPath: string): void {
+  try {
+    fs.rmSync(lockPath, { force: true });
+  } catch {
+    /* ignore */
+  }
+}
+
+
+
 /** Current free memory percentage, from `memory_pressure`. */
 export async function freeMemoryPercent(): Promise<number> {
   try {

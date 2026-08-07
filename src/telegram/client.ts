@@ -10,6 +10,14 @@ export interface TgUpdate {
     message_id: number;
     chat: { id: number | string };
     text?: string;
+    caption?: string;
+    reply_to_message?: {
+      message_id: number;
+      text?: string;
+      caption?: string;
+    };
+    photo?: { file_id: string; width?: number; height?: number; file_size?: number }[];
+    document?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
   };
 }
 
@@ -46,7 +54,26 @@ export class TelegramClient {
     return result ?? [];
   }
 
-  async sendMessage(chatId: number | string, text: string): Promise<void> {
-    await this.call('sendMessage', { chat_id: chatId, text }, undefined);
+  async sendMessage(chatId: number | string, text: string): Promise<{ message_id: number }> {
+    return this.call('sendMessage', { chat_id: chatId, text }, undefined);
+  }
+
+  /** Resolve a file_id to a downloadable path on Telegram's file server. */
+  async getFile(fileId: string): Promise<{ file_id: string; file_path: string; file_size?: number }> {
+    return this.call('getFile', { file_id: fileId }, undefined);
+  }
+
+  /** Download a file returned by getFile to a local path. Returns the path. */
+  async downloadFile(filePath: string, dest: string): Promise<string> {
+    const res = await fetch(`https://api.telegram.org/file/bot${this.token}/${filePath}`, {
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) throw new Error(`telegram file download failed: ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    const fs = await import('node:fs');
+    const { dirname } = await import('node:path');
+    fs.mkdirSync(dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, buf);
+    return dest;
   }
 }
