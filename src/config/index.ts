@@ -150,7 +150,7 @@ function envOr(name: string, fallback: string): string {
 
 export function deepMerge<T>(base: T, override: unknown): T {
   if (override === undefined || override === null) return base;
-  if (typeof base !== 'object' || Array.isArray(base) || typeof override !== 'object') {
+  if (base === null || base === undefined || typeof base !== 'object' || Array.isArray(base) || typeof override !== 'object') {
     return override as T;
   }
   const out: Record<string, unknown> = { ...(base as Record<string, unknown>) };
