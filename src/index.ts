@@ -17,6 +17,7 @@ import { runTelegram } from './cli/telegram.js';
 import { runPerms } from './cli/perms.js';
 import { addMonitor, printMonitors, removeMonitor, runMonitorDaemon } from './cli/monitor.js';
 import { runVoiceSession, runWakeSession, type VoiceSessionOptions } from './cli/voice.js';
+import { phoneCommand } from './cli/phone.js';
 import { installPiper } from './voice/index.js';
 import { ensureConfigFile } from './config/index.js';
 import { VERSION } from './config/defaults.js';
@@ -47,6 +48,12 @@ Usage:
   jarv-genie unlink               forget the hub
   jarv-genie sidecar [--name X] [--speak] [--no-notify] [--remote]   connect a device to the hub
   jarv-genie notify "text" [--device NAME] [--speak] [--remote]   push to connected devices
+  jarv-genie phone pair <host:port> <code>    pair a phone (wireless debugging pair code)
+  jarv-genie phone connect <host:port>        connect to a paired phone
+  jarv-genie phone push <local> <remote>      upload a file to the phone (e.g. /sdcard/Download)
+  jarv-genie phone pull <remote> <local>      download a file from the phone
+  jarv-genie phone ls [dir]                   list files on the phone
+  jarv-genie phone devices / set <host:port> / open <pkg> / shell <args>
   jarv-genie telegram    run the Telegram bridge (talk to Jarv + approve consequential actions remotely)
   jarv-genie perms       one-time: check/grant the macOS permissions Jarv needs
   jarv-genie monitor [add <dir|web|metric> <target> "<prompt>" [--every N] [--notify] [--speak] | list | remove <id>]   long-horizon watches
@@ -318,6 +325,11 @@ async function main(): Promise<void> {
     }
 
     await runMonitorDaemon(backend);
+    return;
+  }
+
+  if (raw[0] === 'phone') {
+    await phoneCommand(raw.slice(1));
     return;
   }
 
