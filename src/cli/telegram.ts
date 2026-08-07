@@ -85,6 +85,33 @@ async function captureAttachment(client: TelegramClient, u: TgUpdate): Promise<s
   return `[Image attached] ${question}. Use vision_identify with imagePath="${dest}".${caption ? '' : ' If the user included instructions, answer them too.'}`;
 }
 
+/**
+ * Hard ceiling on a single task run. The agent loop should normally finish in
+ * well under this even for multi-step work; if it doesn't (a hung model call,
+ * a vision inference that never settles, a tool that blocks forever), we abort
+ * the wait and reply rather than let the bridge wedge — the lease is released
+ * no matter what, so the bot stays responsive.
+ */
+const TASK_RUN_TIMEOUT_MS = 6 * 60 * 1000;
+
+/**
+ * `Promise.race` against a hard timeout. On expiry the caller is told the task
+ * was aborted so it can release the lease and reply instead of hanging. The
+ * underlying work is left to settle in the background and may still log; the
+ * bridge never blocks on it again.
+ */
+async function withHardTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} exceeded ${Math.round(ms / 1000)}s and was aborted — hmm, something hung on my end. Try again or rephrase.`)), ms);
+  });
+  try {
+    return await Promise.race([p, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /** Telegram caps a message at 4096 chars — split longer text into chunks. */
 export function chunkText(text: string, max = 4000): string[] {
   const out: string[] = [];
@@ -284,7 +311,7 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
       }
       if (guard === 'cleaned') process.stdout.write('[jarv-genie] autonomic: freed memory before task\n');
       if (guard === 'compacted') process.stdout.write('[jarv-genie] autonomic: compacted session before task\n');
-      const result = await runner.run(text);
+      const result = await withHardTimeout(runner.run(text), TASK_RUN_TIMEOUT_MS, 'Task run');
       process.stdout.write(`[jarv-genie] telegram -> ${(result.text || '(no response)').slice(0, 160)}\n`);
       for (const part of chunkText(result.text || '(no response)')) {
         await client.sendMessage(chatId!, part);
