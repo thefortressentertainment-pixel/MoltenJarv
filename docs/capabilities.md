@@ -16,7 +16,7 @@ Legend for consent: **R** = read-only (never prompts) · **C** = consent-gated
 | Play a playlist / Liked Songs | `app_command` spotify play uri=spotify:likedsongs; music play playlist= | C |
 | What's playing / is it running | `app_status` (read-only) | R |
 | Take a note | `app_command` notes newNote | C |
-| Send a text | `app_command` messages send | C |
+| Send a text | `app_command` messages send (real contact required; placeholder/test buddies blocked at the reflex) | C |
 | Open a URL / new tab / back / forward | `app_command` safari|chrome openUrl/newTab/back/forward | C |
 | Add a calendar event | `app_command` calendar addEvent(title, date) | C |
 | List running apps | `process_list` | R |

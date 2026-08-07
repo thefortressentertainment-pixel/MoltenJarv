@@ -33,6 +33,17 @@ function mentionsSecrets(args: Record<string, unknown> | undefined): boolean {
   return /(secrets\.json|auth\.json|link\.json|api[_-]?key|token|password|secret)/i.test(hay);
 }
 
+/**
+ * Placeholder / test recipient domains that must never receive a real email.
+ * These are RFC-reserved or clearly fake; an email_send to one is either a
+ * mistake or a test stub, not something a human should ever receive.
+ */
+const PLACEHOLDER_EMAIL_DOMAINS = /@(\[?[a-z0-9.-]*\.)?(example\.(?:com|org|net|test|edu|io)|test|invalid|localhost|local|domain\.(?:invalid|test)|example\.com\.br|foo\.com)\b/i;
+
+function isPlaceholderRecipient(to: string): boolean {
+  return PLACEHOLDER_EMAIL_DOMAINS.test(to);
+}
+
 export interface ReflexResult {
   kind: 'pass' | 'blocked' | 'fast';
   reason?: string;
@@ -63,6 +74,38 @@ export function reflex(call: ToolCall): ReflexResult {
     const p = String((call.arguments ?? {}).path ?? '');
     if (p && isSensitivePath(p)) {
       return { kind: 'blocked', reason: `reflex: refusing to edit credential file "${path.basename(p)}"` };
+    }
+  }
+  // Never email placeholder/test domains (example.*, test, invalid, local).
+  // A real recipient is required; a stub domain is a mistake, not an address.
+  if (name === 'email_send') {
+    const to = String((call.arguments ?? {}).to ?? '');
+    if (!to) {
+      return { kind: 'blocked', reason: 'reflex: email_send requires a recipient (to)' };
+    }
+    if (isPlaceholderRecipient(to)) {
+      return { kind: 'blocked', reason: `reflex: refusing email_send to placeholder/test domain "${to}"` };
+    }
+  }
+  // Never send an iMessage to a guessed, empty, or placeholder buddy. The
+  // same class of mistake that mailed tfe@example.com would drop a text into
+  // the wrong real person's thread. A real contact (a phone number or a name
+  // from the user's own address book) is required; the consent gate still
+  // approves the actual send.
+  if (name === 'app_command') {
+    const a = call.arguments ?? {};
+    const app = String(a.app ?? '').trim().toLowerCase();
+    const action = String(a.action ?? '').trim().toLowerCase();
+    if (app === 'messages' || app === 'imessage') {
+      if (action === 'send') {
+        const contact = String(a.contact ?? '').trim();
+        if (!contact) {
+          return { kind: 'blocked', reason: 'reflex: messages send requires a recipient (contact)' };
+        }
+        if (/@example\.|^buddy$|^test([\s@]|$)|placeholder/i.test(contact)) {
+          return { kind: 'blocked', reason: `reflex: refusing messages send to placeholder/test buddy "${contact}"` };
+        }
+      }
     }
   }
 

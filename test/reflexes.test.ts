@@ -32,3 +32,26 @@ test('reflex marks routine safe organs as fast and lets others pass', () => {
   assert.strictEqual(reflex(call('app_command', { app: 'spotify', action: 'play' })).kind, 'pass', 'consequential actions still reach the cortex');
   assert.strictEqual(reflex(call('email_send', { to: 'a@b.c', subject: 'hi' })).kind, 'pass');
 });
+
+test('reflex blocks email_send to placeholder or test recipient domains', () => {
+  for (const to of ['tfe@example.com', 'user@example.test', 'x@example.org', 'x@example.net', 'x@test', 'x@invalid', 'x@localhost', 'x@foo.com']) {
+    assert.strictEqual(reflex(call('email_send', { to, subject: 's', text: 't' })).kind, 'blocked', `placeholder domain "${to}" must be blocked`);
+  }
+  assert.strictEqual(reflex(call('email_send', { subject: 's', text: 't' })).kind, 'blocked', 'missing recipient must be blocked');
+  // A real, non-placeholder address is left for the cortex / consent gate.
+  assert.strictEqual(reflex(call('email_send', { to: 'thefortressentertainment@gmail.com', subject: 's', text: 't' })).kind, 'pass');
+});
+
+test('reflex blocks messages send without a real contact (same guess-vulnerability class as email)', () => {
+  const ms = (contact?: string) =>
+    call('app_command', { app: 'messages', action: 'send', ...(contact !== undefined ? { contact } : {}) });
+  assert.strictEqual(reflex(ms()).kind, 'blocked', 'missing contact must be blocked');
+  for (const contact of ['buddy', 'test', 'test@example.com', '@example.com', 'placeholder', 'friend@example.net']) {
+    assert.strictEqual(reflex(ms(contact)).kind, 'blocked', `placeholder buddy "${contact}" must be blocked`);
+  }
+  // A real contact (phone number or name) is left for the cortex / consent gate.
+  assert.strictEqual(reflex(ms('+14155550123')).kind, 'pass');
+  assert.strictEqual(reflex(ms('Mom')).kind, 'pass');
+  // Non-send messages actions are unaffected (e.g. opening the app).
+  assert.strictEqual(reflex(call('app_command', { app: 'messages', action: 'open' })).kind, 'pass');
+});
