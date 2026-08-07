@@ -52,7 +52,7 @@ test('schedule_add validates cron and required fields', async () => {
     assert.match(bad.error ?? '', /invalid cron/);
     const missing = (await add.handler({ cron: '0 7 * * *' }, {} as ToolContext)) as { ok: boolean; error?: string };
     assert.strictEqual(missing.ok, false);
-    assert.match(missing.error ?? '', /cron and prompt/);
+    assert.match(missing.error ?? '', /requires a prompt/);
   });
 });
 
@@ -61,6 +61,36 @@ test('reminder tools are gated behind allowControl', async () => {
   const res = (await create.handler({ name: 'x' }, ctxNoControl)) as { ok: boolean; error?: string };
   assert.strictEqual(res.ok, false);
   assert.match(res.error ?? '', /allowControl/);
+});
+
+test('schedule_add accepts a natural-language `when` phrase', async () => {
+  await withHome(async () => {
+    const add = schedulerTools().find((t) => t.name === 'schedule_add')!;
+    const list = schedulerTools().find((t) => t.name === 'schedule_list')!;
+
+    const ok = (await add.handler({ when: 'every monday at 5pm', prompt: 'Monday alarm', notify: true }, {} as ToolContext)) as {
+      ok: boolean;
+      cron?: string;
+    };
+    assert.ok(ok.ok);
+    assert.strictEqual(ok.cron, '0 17 * * 1');
+
+    const l = (await list.handler({}, {} as ToolContext)) as { ok: boolean; schedules: Array<{ cron: string }> };
+    assert.strictEqual(l.schedules[0]?.cron, '0 17 * * 1');
+
+    const bad = (await add.handler({ when: 'nonsense schedule', prompt: 'x' }, {} as ToolContext)) as { ok: boolean; error?: string };
+    assert.strictEqual(bad.ok, false);
+    assert.match(bad.error ?? '', /invalid schedule phrase/);
+  });
+});
+
+test('schedule_add still requires cron or when plus prompt', async () => {
+  await withHome(async () => {
+    const add = schedulerTools().find((t) => t.name === 'schedule_add')!;
+    const noWhen = (await add.handler({ prompt: 'x' }, {} as ToolContext)) as { ok: boolean; error?: string };
+    assert.strictEqual(noWhen.ok, false);
+    assert.match(noWhen.error ?? '', /cron expression or a `when` phrase/);
+  });
 });
 
 test('reminder_create validates the name field', async () => {

@@ -1,6 +1,7 @@
 import type { ToolDefinition } from '../agent/types.js';
 import { loadAgentConfig, saveAgentConfig, newScheduleId } from '../scheduler/index.js';
 import { parseCron } from '../scheduler/cron.js';
+import { schedulePhraseToCron } from '../scheduler/phrase.js';
 
 /**
  * Scheduler tools: recurring alarms / reminders / briefings. The always-on
@@ -14,26 +15,32 @@ export function schedulerTools(): ToolDefinition[] {
       name: 'schedule_add',
       system: 'autonomic',
       description:
-        'Create a recurring scheduled task that runs the agent at a cron time. Great for alarms, reminders, and briefings (e.g. "0 7 * * 6" = every Saturday 07:00). Pass --flags via notify/speak options. Returns the schedule id.',
+        'Create a recurring scheduled task that runs the agent at a cron time. Great for alarms, reminders, and briefings. Pass cron as a 5-field expression (e.g. "0 7 * * 6" = every Saturday 07:00) OR a natural-language `when` phrase (e.g. "every monday at 5pm", "daily at 9", "4-hourly"). Pass --flags via notify/speak options. Returns the schedule id.',
       inputSchema: {
         type: 'object',
         properties: {
           cron: { type: 'string', description: '5-field cron expression, e.g. "0 7 * * 6".' },
+          when: { type: 'string', description: 'Natural-language schedule phrase, e.g. "every monday at 5pm" or "daily at 9". Alternative to cron.' },
           prompt: { type: 'string', description: 'What to do when it fires (shown to the agent).' },
           notify: { type: 'boolean', description: 'Send a macOS notification when it fires (default true).' },
           speak: { type: 'boolean', description: 'Speak the result aloud when it fires.' },
         },
-        required: ['cron', 'prompt'],
+        required: ['prompt'],
       },
       consequential: true,
       handler: async (args: Record<string, unknown>) => {
-        const cron = String(args.cron ?? '').trim();
+        const cronArg = String(args.cron ?? '').trim();
+        const whenArg = String(args.when ?? '').trim();
         const prompt = String(args.prompt ?? '').trim();
-        if (!cron || !prompt) return { ok: false, error: 'schedule_add requires cron and prompt' };
+        if (!cronArg && !whenArg) return { ok: false, error: 'schedule_add requires a cron expression or a `when` phrase' };
+        if (!prompt) return { ok: false, error: 'schedule_add requires a prompt' };
+        let cron: string;
         try {
+          cron = cronArg !== '' ? cronArg : schedulePhraseToCron(whenArg);
           parseCron(cron);
         } catch (err) {
-          return { ok: false, error: `invalid cron: ${err instanceof Error ? err.message : String(err)}` };
+          const source = cronArg !== '' ? `invalid cron: ${err instanceof Error ? err.message : String(err)}` : `invalid schedule phrase "${whenArg}": ${err instanceof Error ? err.message : String(err)}`;
+          return { ok: false, error: source };
         }
         const cfg = loadAgentConfig();
         const id = newScheduleId();
