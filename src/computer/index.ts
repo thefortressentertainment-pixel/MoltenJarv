@@ -104,8 +104,8 @@ export interface DescribeImageOptions {
 export async function describeImage(file: string, config: JarvGenieConfig, opts: DescribeImageOptions = {}): Promise<string> {
   const primary = config.providers.primary;
   const comp = (config as unknown as { computer?: ComputerConfig }).computer ?? {};
-  const baseUrl = opts.endpoint ?? primary.baseUrl ?? 'http://127.0.0.1:11434/v1';
-  const model = opts.model ?? 'llama3.2-vision';
+  const baseUrl = opts.endpoint ?? comp.visionEndpoint ?? primary.baseUrl ?? 'http://127.0.0.1:11434/v1';
+  const model = opts.model ?? comp.visionModel ?? 'llava';
   // The vision provider usually has its own key (e.g. Groq), so resolve it from
   // computer.visionApiKeyEnv before falling back to the primary provider's key.
   const keyEnv = opts.apiKeyEnv ?? comp.visionApiKeyEnv ?? (baseUrl.includes('groq') ? 'GROQ_API_KEY' : undefined);

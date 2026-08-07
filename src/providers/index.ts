@@ -1,5 +1,6 @@
 import type { JarvGenieConfig, EndpointConfig } from '../config/index.js';
 import { resolveApiKey } from '../config/index.js';
+import type { ComputerConfig } from '../computer/index.js';
 import { OpenAICompatibleProvider } from './openai.js';
 import type { ChatOptions, Provider } from './types.js';
 import type { ChatResult } from '../agent/types.js';
@@ -26,7 +27,10 @@ export class ModelRouter {
   private fallback: Provider | null;
   private lastError: unknown = undefined;
 
+  private config: JarvGenieConfig;
+
   constructor(config: JarvGenieConfig) {
+    this.config = config;
     this.primary = new OpenAICompatibleProvider('primary', 'Primary', config.providers.primary);
     this.fallback = config.providers.fallback && fallbackReady(config.providers.fallback)
       ? new OpenAICompatibleProvider('fallback', 'Fallback', config.providers.fallback)
@@ -93,6 +97,23 @@ export class ModelRouter {
         entries.push({ name: provider.label, model: provider.model, ok, error: ok ? undefined : 'unreachable' });
       } catch (err) {
         entries.push({ name: provider.label, model: provider.model, ok: false, error: (err as Error).message });
+      }
+    }
+    const comp = (this.config as unknown as { computer?: ComputerConfig }).computer ?? {};
+    for (const model of [comp.visionModel, comp.cameraModel].filter(Boolean) as string[]) {
+      const endpoint = comp.visionEndpoint ?? 'http://127.0.0.1:11434/v1';
+      try {
+        const res = await fetch(`${endpoint.replace(/\/v1$/, '')}/api/tags`, { signal: AbortSignal.timeout(5000) });
+        const data = (await res.json()) as { models?: { name: string }[] };
+        const installed = (data.models ?? []).some((m) => m.name.split(':')[0] === model.split('/').pop());
+        entries.push({
+          name: 'vision:' + model,
+          model,
+          ok: installed,
+          error: installed ? undefined : `vision model "${model}" not found on ${endpoint}`,
+        });
+      } catch (err) {
+        entries.push({ name: 'vision:' + model, model, ok: false, error: (err as Error).message });
       }
     }
     return entries;
