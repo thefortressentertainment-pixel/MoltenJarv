@@ -27,6 +27,7 @@ import { runMcpServer } from './mcp/server.js';
 import { getLinkStore, RemoteClient } from './remote/client.js';
 import { loadAgentConfig, recordDaemonCrash, resetDaemonCrashCount } from './scheduler/index.js';
 import { runDreamCommand } from './cli/dream.js';
+import { runPairCommand } from './cli/pair.js';
 import { serveUi, type UiServerOptions } from './ui/server.js';
 
 interface Args {
@@ -57,6 +58,7 @@ Usage:
   jarv-genie phone ls [dir]                   list files on the phone
   jarv-genie phone devices / set <host:port> / open <pkg> / shell <args>
   jarv-genie telegram    run the Telegram bridge (talk to Jarv + approve consequential actions remotely)
+  jarv-genie pair        show a one-time code to verify/trust a Telegram device
   jarv-genie perms       one-time: check/grant the macOS permissions Jarv needs
   jarv-genie monitor [add <dir|web|metric> <target> "<prompt>" [--every N] [--notify] [--speak] | list | remove <id>]   long-horizon watches
   jarv-genie monitor    run the monitor daemon (fires when a watched target changes)
@@ -219,6 +221,11 @@ async function main(): Promise<void> {
 
   if (raw[0] === 'update') {
     await runUpdateCommand(raw.slice(1));
+    return;
+  }
+
+  if (raw[0] === 'pair') {
+    await runPairCommand();
     return;
   }
 

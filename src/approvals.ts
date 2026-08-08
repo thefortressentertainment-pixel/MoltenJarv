@@ -5,7 +5,8 @@
  * gate is open and consequential tools run directly.
  */
 
-export type ApprovalHandler = (question: string) => Promise<boolean>;
+export type ApprovalKind = { failClosed?: boolean; risk?: 'read' | 'write-local' | 'exec' | 'external' };
+export type ApprovalHandler = (question: string, kind?: ApprovalKind) => Promise<boolean>;
 
 let handler: ApprovalHandler | null = null;
 
@@ -39,7 +40,7 @@ export function setAutoApprove(v: boolean): void {
  */
 export async function requireApproval(question: string): Promise<boolean> {
   if (!handler) return true;
-  return handler(question);
+  return handler(question, { failClosed: false });
 }
 
 /**
@@ -61,7 +62,7 @@ This action is fail-closed: it is externally visible and irreversible, so it can
 To proceed, run this action interactively (with a channel that can ask you for approval), or approve it explicitly.`,
     );
   }
-  return handler(question);
+  return handler(question, { failClosed: true, risk: 'external' });
 }
 
 // Tool arguments shown in an approval question are capped so large payloads

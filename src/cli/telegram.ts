@@ -11,6 +11,12 @@ import {
   type AcquiredLease,
 } from '../resource.js';
 import { TelegramClient, type TgUpdate } from '../telegram/client.js';
+import {
+  isTrustedDevice,
+  verifyPairingCode,
+  pairTrustedDevice,
+  clearPairingChallenge,
+} from '../telegram/trust.js';
 import { TaskRunner } from '../agent/taskrunner.js';
 import type { AgentContext } from './index.js';
 /**
@@ -245,12 +251,25 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
   // tool call for the current task without asking again. Reset per task.
   setAutoApprove(false);
 
-  setApprovalHandler((question: string) => {
+  setApprovalHandler((question: string, kind) => {
     if (!chatId) return Promise.resolve(false);
     const ownerId = chatId;
     if (isAutoApproving()) return Promise.resolve(true);
+
+    // Streamlined path: a VERIFIED (paired) device trusts everything except
+    // fail-closed/external actions (email send, shutdown, posts). For a trusted
+    // device, a normal consequential ask auto-approves — "I told you to do it,
+    // so do it." Only fail-closed tools still go to the human for confirmation.
+    if (isTrustedDevice(ownerId) && !kind?.failClosed) {
+      process.stdout.write(`[jarv-genie] trusted device — auto-approving ${question.slice(0, 80)}\n`);
+      return Promise.resolve(true);
+    }
+
+    // Untrusted-but-confirmed owner (paired or owner chat) asking a fail-closed /
+    // external action still requires a live yes. A never-paired owner chat for a
+    // non-fail-closed ask falls back to the legacy prompt.
     process.stdout.write(`[jarv-genie] telegram approval requested: ${question.slice(0, 120)}\n`);
-    const body = `🔒 Jarv wants approval for:\n\n${question}\n\nReply **yes** to allow, **no** to deny. Or **yes all** to allow every remaining step of this task without asking again.`;
+    const body = `🔒 Jarv wants approval for:\n\n${question}\n${kind?.failClosed ? '\nThis action is fail-closed (irreversible/off-machine) and always requires explicit approval.' : ''}\n\nReply **yes** to allow, **no** to deny. Or **yes all** to allow every remaining step of this task without asking again.`;
     return (async () => {
       // Hold onto the approval message id so a reply-to-targeted message can
       // be matched as a verdict even if the owner also sends other messages.
@@ -331,16 +350,32 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
     const from = u.message?.chat?.id;
     const text = u.message?.text;
     if (from === undefined) return;
-    if (String(from) !== String(chatId)) {
-      if (!chatId) {
+
+    // Pairing handshake: complete a live `verify <code>` from any sender. Only
+    // someone physically at the Mac knows the code, so whoever submits it becomes
+    // both the owner and the verified ("trusted") device.
+    const verifyMatch = text?.match(/^verify\s+(.+)$/i);
+    if (verifyMatch) {
+      const submitted = verifyMatch[1]!.trim();
+      if (verifyPairingCode(submitted)) {
         chatId = String(from);
         secrets.set('TELEGRAM_CHAT_ID', chatId);
-        process.stdout.write(`[jarv-genie] claimed owner chat id ${chatId}\n`);
-        await client.sendMessage(from, '✅ You are now the owner of this bot. Jarv Genie is online — tell me what you need.');
+        pairTrustedDevice(from);
+        process.stdout.write(`[jarv-genie] paired trusted device chat ${chatId}\n`);
+        await client.sendMessage(from, '✅ Device verified and paired. From now on I\'ll trust commands from here — irreversible/off-machine actions will still ask first. Tell me what you need.');
+      } else {
+        await client.sendMessage(from, '❌ That pairing code is invalid or expired. Generate a new one with `jarv-genie pair`.');
+      }
+      return;
+    }
+
+    if (String(from) !== String(chatId)) {
+      if (!chatId) {
+        await client.sendMessage(from, '🔐 This bot isn\'t paired yet. On the Jarv machine run `jarv-genie pair` to get a code, then send me: `verify <code>`.');
       } else {
         await client.sendMessage(from, 'not authorized');
-        return;
       }
+      return;
     }
 
     // Handle image attachments (photos or image documents). Download the largest
