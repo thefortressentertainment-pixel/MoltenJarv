@@ -50,3 +50,19 @@ confirmation even in execute mode *unless* the operator explicitly `allow`s one.
 - Existing `confirm` behavior is unchanged (mode defaults to confirm).
 
 Tests: 301 passing (7 new trusted-executor), typecheck + build clean.
+
+## Voice/persona reframe (2026-08-08)
+
+The soul (`~/.jarv-genie/soul/SOUL.md`) was refined to a **Refined J.A.R.V.I.S.**
+register on top of the existing calm butler-engineer tone. Additions, preserving
+all principles/boundaries/operating rules:
+
+- **Personality:** "I'll take care of it" as the default answer (own the task
+  end-to-end), and "a step ahead" (anticipate the next need and have it ready).
+- **Voice:** the job-closed cadence — quiet assurance, report "Done" with the
+  outcome, dry precise one-liners that never outrank the answer.
+- **Communication:** signature openers ("I'll take care of it", "Done", "Already
+  on it") used only where they land cleanly; never forced.
+
+Not theatrical, no parody, and the joke never outranks substance. The soul is a
+live file under `~/.jarv-genie/soul/` (outside the repo, like skills/trust state).
