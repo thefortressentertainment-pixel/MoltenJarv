@@ -105,17 +105,22 @@ built now — avoids the privacy + weight cost on the daily driver.
 Each becomes its own `docs/<source>-harvest-plan.md` (the established
 convention) when picked up. Ranked by leverage + feasibility on T1.
 
-### P1. Computer-use decision model — `anthropics/claude-quickstarts` → `computer-use-best-practices` (T1)
+### P1. Computer-use decision model — `anthropics/claude-quickstarts` → `computer-use-best-practices` (T1) — ✅ coordinate localization landed
 MIT. Native-macOS reference. Jarv already can screenshot + UI-click/type; what's
 missing is the **decision model** to make "see → click" reliable.
 - Port the **coordinate localization round-trip** (the vision model must be shown
   the image at the size/scale it will click; translate predicted pixels back to
   real coordinates). Highest-ROI fix for `screen_capture`+`ui_click`.
-- **Batched UI actions** (`computer_batch`) to chain predictable clicks in one turn.
+  → `src/computer/locate.ts` (pure + testable: `mapPointToReal`, `normalizeToReal`,
+  `bboxToPoint`, sent-width/height — the Anthropic round-trip); `screen_capture`
+  now returns real `width`/`height` + invites a point; new `ui_click_at(x, y)`
+  drives a real click at screen pixels; `screenDimensions()` helper. Tests:
+  6 new (`test/locate.test.ts`).
+- **Batched UI actions** (`computer_batch`) to chain predictable clicks in one turn. (deferred)
 - **Screenshot-token pruning** (interval screenshots) to keep token cost/latency
-  flat on 8 GB.
+  flat on 8 GB. (deferred)
 - **Trajectory recording** (per-run click/screenshot log) → feed the `judge`
-  tool so Jarv can score its own GUI runs against a task.
+  tool so Jarv can score its own GUI runs against a task. (deferred)
 
 ### P2. Environment/home control — `homeassistant-ai/ha-mcp` (Δ / T2–T3, doc only)
 MIT, 88 tools over MCP. Document-only per owner decision (Home Assistant is not
@@ -172,8 +177,11 @@ runtime. T2: needs the extra RAM/cores.
 **Phase 1 — T1, high-leverage, no new heavy runtimes** (in dependency order)
 1. P4 memory-extraction loop ✅ `src/memory/extract.ts` + `jarv-genie extract` —
    automatic durable-fact discovery from conversations/transcripts (ADD-only,
-   dedup, fail-open, `extraction` provenance). 328 tests passing. → next: P1
-   computer-use localization.
+   dedup, fail-open, `extraction` provenance). 328 tests passing.
+2. P1 computer-use localization ✅ `src/computer/locate.ts` + `ui_click_at` +
+   `screen_capture` dimensions — the "see → click" coordinate round-trip and a
+   real screen-pixel click path. 334 tests passing, typecheck + build clean.
+   → next: P2 portable patterns (BM25 tool-pinning + read/write policy split).
 2. P1 computer-use localization (+ batching + pruning + trajectories for the
    `judge`) — makes existing GUI/UI tools trustworthy.
 3. P2's **two portable patterns** (BM25 tool-pinning + read/write policy split).

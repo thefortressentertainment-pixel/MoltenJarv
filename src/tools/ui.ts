@@ -154,6 +154,40 @@ export function uiTools(): ToolDefinition[] {
       },
     },
     {
+      name: 'ui_click_at',
+      system: 'effector',
+      description:
+        'Click at an exact (x, y) coordinate on the screen (top-left origin, in real screen pixels). Use when you want to click a specific point the vision model identified on a screenshot — the coordinate-complete path for canvas/web/in-app UI that ui_click (by button title) cannot address. Pair with screen_capture, which returns the screen width/height and invites point selection. Coordinates are interpreted in the current display resolution.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          x: { type: 'number', description: 'Horizontal screen pixel (0 = left edge).' },
+          y: { type: 'number', description: 'Vertical screen pixel (0 = top edge).' },
+        },
+        required: ['x', 'y'],
+      },
+      consequential: true,
+      handler: async (args: Record<string, unknown>, ctx: ToolContext) => {
+        const gate = requireControl(ctx);
+        if (!gate.ok) return gate;
+        const x = Number(args.x);
+        const y = Number(args.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+          return { ok: false, error: 'x and y must be finite numbers' };
+        }
+        const xi = Math.max(0, Math.round(x));
+        const yi = Math.max(0, Math.round(y));
+        try {
+          await runAppleScript(
+            `tell application "System Events"\n  click at {${xi}, ${yi}}\nend tell`,
+          );
+          return { ok: true, at: { x: xi, y: yi } };
+        } catch (err) {
+          return { ok: false, error: `could not click at (${xi}, ${yi}): ${err instanceof Error ? err.message : String(err)}` };
+        }
+      },
+    },
+    {
       name: 'ui_type',
       system: 'effector',
       description:

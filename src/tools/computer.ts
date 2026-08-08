@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ToolContext, ToolDefinition } from '../agent/types.js';
 import type { JarvGenieConfig } from '../config/index.js';
-import { controlAllowed, describeScreen, extractScreenText, openApp, runAppleScript, screenshot } from '../computer/index.js';
+import { controlAllowed, describeScreen, extractScreenText, openApp, runAppleScript, screenDimensions, screenshot } from '../computer/index.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -15,7 +15,7 @@ export function computerTools(): ToolDefinition[] {
       name: 'screen_capture',
       system: 'sense',
       description:
-        'Capture the current screen on the hub machine and describe what is visible (windows, apps). Requires macOS screen-recording permission. If no vision model is configured, falls back to reading the on-screen TEXT via macOS OCR (instant, on-device). Optionally pass a question about the screen.',
+        'Capture the current screen on the hub machine and describe what is visible (windows, apps). Requires macOS screen-recording permission. Returns the real screen width/height (in pixels) alongside the description, so you can identify a point and then drive it with ui_click_at(x, y). If no vision model is configured, falls back to reading the on-screen TEXT via macOS OCR (instant, on-device). Optionally pass a question about the screen.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -28,10 +28,12 @@ export function computerTools(): ToolDefinition[] {
         const file = path.join(dir, 'screen.png');
         try {
           await screenshot(file);
+          const dims = await screenDimensions();
           const question = String(args.question ?? '').trim() || undefined;
+          const base = dims ? `Screen resolution: ${dims.w} x ${dims.h} px (top-left origin; use ui_click_at(x, y) to click a point).\n` : '';
           try {
             const description = await describeScreen(file, ctx.config as JarvGenieConfig, question);
-            return { ok: true, description };
+            return { ok: true, height: dims?.h, width: dims?.w, description: base + description };
           } catch (visionErr) {
             // No usable vision model (e.g. small RAM machine) — fall back to
             // on-device OCR so Jarv can still read the screen.
@@ -39,9 +41,13 @@ export function computerTools(): ToolDefinition[] {
             if (ocr.ok) {
               return {
                 ok: true,
+                height: dims?.h,
+                width: dims?.w,
                 mode: 'ocr',
                 description:
-                  `(No vision model available — reading the on-screen text instead.)\n\n${ocr.text}`,
+                  `(No vision model available — reading the on-screen text instead.)\n\n` +
+                  base +
+                  ocr.text,
               };
             }
             return {

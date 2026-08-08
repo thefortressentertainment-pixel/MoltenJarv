@@ -214,6 +214,26 @@ export async function runAppleScript(script: string): Promise<string> {
   return res.stdout;
 }
 
+/** Current main-display resolution as {w, h} real pixels, or null if it cannot
+ *  be read (e.g. no display access on this context). Uses System Events so it
+ *  aligns with the coordinate space ui_click_at drives. */
+export async function screenDimensions(): Promise<{ w: number; h: number } | null> {
+  if (process.platform !== 'darwin') return null;
+  try {
+    const out = await runAppleScript(
+      'tell application "System Events" to get size of resolution of the first display',
+    );
+    const m = out.trim().match(/^\s*(\d[\d,]*),\s*(\d[\d,]*)/);
+    if (!m) return null;
+    const w = Number((m[1] ?? '').replace(/,/g, ''));
+    const h = Number((m[2] ?? '').replace(/,/g, ''));
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return null;
+    return { w, h };
+  } catch {
+    return null;
+  }
+}
+
 export function controlAllowed(config: JarvGenieConfig): boolean {
   return (config as unknown as { computer?: ComputerConfig }).computer?.allowControl === true;
 }
