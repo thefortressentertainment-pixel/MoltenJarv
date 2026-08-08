@@ -164,12 +164,17 @@ docs/emails/exports**. Port the lightweight pipeline
 the installed `nomic-embed-text`). Lazily index `~/Documents`, email exports,
 etc. — paired with MinerU (already surveyed) for messy/scanned PDFs.
 
-### P6. Self-learning skills — `OS-Copilot/FRIDAY` (T1/T2)
+### P6. Self-learning skills — `OS-Copilot/FRIDAY` (T1/T2) — ✅ landed (T1 read/write)
 MIT. Watch how a task completes; on success, **record a reusable procedure/skill**
 (like taste-skill's SKILL.md, but auto-generated from a verified run). Jarv's
 `judge` + `deliverylog` already certify "done"; close the loop by letting a
 verified run slot a SKILL.md into `~/.jarv-genie/skills/` — this is how Jarv
 starts to genuinely "learn by doing" (T2 for full GUI-trajectory variant).
+→ `src/learn.ts` (saveSkill/skillSlug/composeSkill/shouldLearn with a judge-score
+gate) + `src/tools/learn.ts` (`learn_skill` tool, consequential, writes a SKILL.md
+into the skills dir, refuses to generalize from low-judge runs), registered at
+`config.agent.skillsPath`. Tests: 9 new (`test/learn.test.ts`). Full suite 351
+passing, typecheck + build clean. (Full GUI-trajectory auto-capture → T2.)
 
 ### P7. Concurrent sub-agents — orchestrator shape from `microsoft/JARVIS`/HuggingGPT (T2)
 MIT. Jarv is single-brain. Port only the **controller's task-DAG planning**
@@ -189,18 +194,15 @@ runtime. T2: needs the extra RAM/cores.
    `screen_capture` dimensions — the "see → click" coordinate round-trip and a
    real screen-pixel click path. 334 tests passing, typecheck + build clean.
 3. P2 portable patterns ✅ BM25 tool-pinning (`src/tools/pinning.ts`, wired into
-   `TaskRunner` behind `agent.toolPinning.maxTools`) + read/write policy split
+   `TaskRunner` behind `agent.toolPinning.maxTools` = 12) + read/write policy split
    (`src/risk.ts` `policyFor`). 342 tests passing.
-   → next (Phase 2): P6 self-learning skill caching.
-2. P1 computer-use localization (+ batching + pruning + trajectories for the
-   `judge`) — makes existing GUI/UI tools trustworthy.
-3. P2's **two portable patterns** (BM25 tool-pinning + read/write policy split).
-4. P5 personal-knowledge RAG (local, one-time index + query tool).
-5. B2 **`jarv-genie listen`** — the optional constraint-free voice loop (opt-in).
+4. P5 personal-knowledge RAG (local, one-time index + query tool). [pending]
+5. B2 **`jarv-genie listen`** — the optional constraint-free voice loop (opt-in). [pending]
 
 **Phase 2 — T1/T2**
-6. P6 self-learning skill caching (verified run → SKILL.md), leaning on `judge`.
-7. B2 diarization + spoken-instruction store maturity.
+6. P6 self-learning skill caching ✅ `src/learn.ts` + `learn_skill` tool — verified
+   run → reusable SKILL.md, judge-score gated. 351 tests passing.
+7. B2 diarization + spoken-instruction store maturity. [pending]
 
 **Phase 3 — T2/T3 (hardware gates, documented not built)**
 8. P3 screenpipe companion (ambient room capture + life memory).
