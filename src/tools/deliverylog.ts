@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import type { ToolDefinition } from '../agent/types.js';
 import { dataHome } from '../config/defaults.js';
+import { sha256Json } from '../attest.js';
 
 /**
  * Delivery Track Record — a first-class part of the tool pipeline.
@@ -43,6 +44,14 @@ interface ChainManifest {
   count: number;
   root: string;
   updatedAt: string;
+  /** Canonical, timestamp-excluded attestation of the chain state (skylos
+   *  discipline): digest over {schema, count, root}. Re-runnable byte-identical. */
+  attestation?: string;
+}
+
+/** Canonical, timestamp-excluded attestation of the chain state (skylos harvest). */
+function manifestAttestation(m: { genesis: string; count: number; root: string }): string {
+  return sha256Json({ schema: 'jarv-delivery-chain-v2', genesis: m.genesis, count: m.count, root: m.root });
 }
 
 function sha256(s: string): string {
@@ -127,6 +136,7 @@ export async function backfillChain(): Promise<{ ok: boolean; entries: number; r
     await fs.writeFile(logPath(), output, { encoding: 'utf8' });
   }
   const manifest: ChainManifest = { genesis: GENESIS, count: entries.length, root: prev, updatedAt: new Date().toISOString() };
+  manifest.attestation = manifestAttestation(manifest);
   await writeManifest(manifest);
   return { ok: true, entries: entries.length, root: prev };
 }
@@ -143,6 +153,8 @@ export async function verifyChain(): Promise<{
   brokenAt: number | null;
   manifestCount: number | null;
   manifestRoot: string | null;
+  attestation: string | null;
+  attestationOk: boolean | null;
 }> {
   const raw = await fs.readFile(logPath(), 'utf8').catch(() => '');
   const { entries } = splitEntries(raw);
@@ -158,19 +170,30 @@ export async function verifyChain(): Promise<{
         brokenAt: e.index,
         manifestCount: manifest?.count ?? null,
         manifestRoot: manifest?.root ?? null,
+        attestation: manifest?.attestation ?? null,
+        attestationOk: null,
       };
     }
     prev = expected;
   }
   const root = entries.length > 0 ? prev : GENESIS;
   const rootOk = manifest === null || manifest.root === root;
+  // If the manifest carries a canonical attestation, recompute and compare it.
+  let attestationOk: boolean | null = null;
+  let attestation: string | null = null;
+  if (manifest?.attestation) {
+    attestation = manifestAttestation({ genesis: manifest.genesis, count: manifest.count, root: manifest.root });
+    attestationOk = attestation === manifest.attestation;
+  }
   return {
-    ok: rootOk,
+    ok: rootOk && (attestationOk === null || attestationOk),
     count: entries.length,
     root,
     brokenAt: null,
     manifestCount: manifest?.count ?? null,
     manifestRoot: manifest?.root ?? null,
+    attestation,
+    attestationOk,
   };
 }
 
@@ -230,10 +253,11 @@ export async function appendDelivery(
   } catch (err) {
     return { ok: false, stamp, hash: '', path: p, error: err instanceof Error ? err.message : String(err) };
   }
-  await writeManifest({ genesis: GENESIS, count: (manifest?.count ?? 0) + 1, root: hash, updatedAt: new Date().toISOString() });
+  const nextManifest: ChainManifest = { genesis: GENESIS, count: (manifest?.count ?? 0) + 1, root: hash, updatedAt: new Date().toISOString() };
+  nextManifest.attestation = manifestAttestation(nextManifest);
+  await writeManifest(nextManifest);
   return { ok: true, stamp, hash, path: p };
 }
-
 /** The `log_delivery` + `deliverylog_verify` tools — always registered, never hidden. */
 export function deliveryLogTools(): ToolDefinition[] {
   return [

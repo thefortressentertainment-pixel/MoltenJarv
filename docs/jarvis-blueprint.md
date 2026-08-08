@@ -270,3 +270,9 @@ from their public repos under the licenses noted (all patterns re-expressed in
 Jarv's own TypeScript — nothing copied wholesale). Successor to the
 `cortex/openworker/grok-build/taste-skill` harvests; each future `*-harvest-plan.md`
 carries its own attribution.
+
+Two additional harvests landed beyond the matrix, both improving Jarv's own
+quality/self-verification rather than adding J.A.R.V.I.S. powers:
+`docs/graphiti-harvest-plan.md` (temporal context-graph memory) and
+`docs/skylos-harvest-plan.md` (deterministic 3-state `verify_change` + canonical
+attestation on the Delivery Track Record).
