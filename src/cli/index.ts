@@ -12,6 +12,7 @@ import { computerTools } from '../tools/computer.js';
 import { memoryTools } from '../tools/memory.js';
 import { speechTools } from '../tools/speech.js';
 import { ToolRegistry } from '../tools/registry.js';
+import { validateToolset } from '../tools/registry.js';
 import { timeTools } from '../tools/time.js';
 import { webTools } from '../tools/web.js';
 import { moltbookTools } from '../tools/moltbook.js';
@@ -33,6 +34,7 @@ import { calendarTools } from '../tools/calendar.js';
 import { briefingTools } from '../tools/briefing.js';
 import { deliveryLogTools } from '../tools/deliverylog.js';
 import { visionTools } from '../tools/vision.js';
+import { useToolTools } from '../tools/useTool.js';
 
 const SESSION = 'default';
 
@@ -51,10 +53,17 @@ export async function buildAgent(): Promise<AgentContext> {
   const memory = buildMemory(config);
 
   const registry = new ToolRegistry();
-  registry.registerMany([...timeTools(), ...fileTools(), ...memoryTools(), ...webTools(), ...speechTools(), ...computerTools(), ...moltbookTools(), ...emailTools(), ...reminderTools(), ...schedulerTools(), ...systemTools(), ...uiTools(), ...drawTools(), ...telegramTools(), ...statusTools(), ...cameraTools(), ...calendarTools(), ...briefingTools(), ...selfReviewTools(), ...shutdownTools(), ...codeTools(), ...appsTools(), ...initiativeTools(), ...deliveryLogTools(), ...visionTools()]);
+  registry.registerMany([...timeTools(), ...fileTools(), ...memoryTools(), ...webTools(), ...speechTools(), ...computerTools(), ...moltbookTools(), ...emailTools(), ...reminderTools(), ...schedulerTools(), ...systemTools(), ...uiTools(), ...drawTools(), ...telegramTools(), ...statusTools(), ...cameraTools(), ...calendarTools(), ...briefingTools(), ...selfReviewTools(), ...shutdownTools(), ...codeTools(), ...appsTools(), ...initiativeTools(), ...deliveryLogTools(), ...visionTools(), ...useToolTools()]);
 
   const { tools: externalTools, errors: externalErrors } = await loadExternalMcpTools(config.mcp.servers);
   registry.registerMany(externalTools);
+
+  // Finalize-time consistency check so the model is never handed an incoherent
+  // toolset this run (see TOOLSET_CONSTRAINTS in src/tools/registry.ts).
+  const toolset = validateToolset(registry.list());
+  if (toolset.length > 0) {
+    for (const issue of toolset) externalErrors.push(issue);
+  }
 
   const router = new ModelRouter(config);
   const agent = new Agent({ router, tools: registry, memory, config });

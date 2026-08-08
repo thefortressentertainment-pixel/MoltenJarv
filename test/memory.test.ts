@@ -5,8 +5,9 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { FactStore } from '../src/memory/store.js';
 import { SessionStore } from '../src/memory/sessions.js';
-import { cosineSimilarity, keywordSearch, SemanticSearch } from '../src/memory/search.js';
+import { cosineSimilarity, keywordSearch, SemanticSearch, mmrRerank } from '../src/memory/search.js';
 import { VectorCache } from '../src/memory/search.js';
+import type { MemoryFact } from '../src/memory/types.js';
 
 test('FactStore persists adds and removals', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'jarv-facts-'));
@@ -75,3 +76,76 @@ test('SessionStore appends, loads, and resets', async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('FactStore.recordAccess increments counters and persists', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'jarv-acc-'));
+  try {
+    const store = new FactStore(path.join(dir, 'facts.json'));
+    const f = await store.add('rehearsed fact');
+    const read = new FactStore(path.join(dir, 'facts.json')); // fresh read
+    assert.strictEqual((await read.get(f.id))?.accessCount, 0);
+    const touched = await read.recordAccess([f.id, 'missing-id']);
+    assert.strictEqual(touched.length, 1);
+    assert.strictEqual(touched[0]!.accessCount, 1);
+    const reloaded = new FactStore(path.join(dir, 'facts.json'));
+    assert.strictEqual((await reloaded.get(f.id))?.accessCount, 1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('temporal decay hits old session facts but exempts evergreen', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'jarv-decay-'));
+  try {
+    const cache = new VectorCache(path.join(dir, 'vectors.json'));
+    const search = new SemanticSearch(null, cache, { halfLifeDays: 1 });
+    // Identical bodies except source + age, so only decay/evergreen differs.
+    const oldSession = { id: 's', text: 'aquamarine note', source: 'session', createdAt: new Date(Date.now() - 10 * 86400000).toISOString(), updatedAt: '' };
+    const evergreen = { id: 'e', text: 'aquamarine note', source: 'user', createdAt: new Date(Date.now() - 10 * 86400000).toISOString(), updatedAt: '' };
+    const recentSession = { id: 'r', text: 'aquamarine note', source: 'session', createdAt: new Date().toISOString(), updatedAt: '' };
+
+    const hits = await search.search('aquamarine', [oldSession, evergreen, recentSession], 10);
+    const byId = new Map(hits.map((h) => [h.fact.id, h.rawScore]));
+    // Evergreen (no decay) should outrank the equally-old but decaying session.
+    assert.ok((byId.get('e') ?? 0) > (byId.get('s') ?? 0), 'evergreen outranks equally-old session');
+    // A fresh session fact outranks an old decaying one.
+    assert.ok((byId.get('r') ?? 0) > (byId.get('s') ?? 0), 'recent session outranks old session');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('access boost raises scores for rehearsed facts', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'jarv-boost-'));
+  try {
+    const cache = new VectorCache(path.join(dir, 'vectors.json'));
+    const search = new SemanticSearch(null, cache);
+    const a = { id: 'a', text: 'favorite color is aquamarine', source: 'user', createdAt: new Date().toISOString(), updatedAt: '', accessCount: 0 };
+    const b = { id: 'b', text: 'favorite color is aquamarine', source: 'user', createdAt: new Date().toISOString(), updatedAt: '', accessCount: 50 };
+    const hits = await search.search('favorite color aquamarine', [a, b], 5);
+    const byId = new Map(hits.map((h) => [h.fact.id, h.rawScore]));
+    assert.ok((byId.get('b') ?? 0) > (byId.get('a') ?? 0), 'more-accessed fact ranks higher');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('MMR re-rank promotes diversity over near-duplicate recall', async () => {
+  const mk = (id: string, text: string): MemoryFact => ({ id, text, source: 'user', createdAt: new Date().toISOString(), updatedAt: '' });
+  const dup1 = mk('d1', 'meeting with Alice about the Q3 budget forecast');
+  const dup2 = mk('d2', 'Alice Q3 budget meeting, budget forecast details');
+  const distinct = mk('x', 'also completed the spring marketing calendar for Q3');
+  const hits = [
+    { fact: dup1, rawScore: 0.9, score: 0.9 },
+    { fact: dup2, rawScore: 0.88, score: 0.88 },
+    { fact: distinct, rawScore: 0.8, score: 0.8 },
+  ];
+  const reranked = mmrRerank('meeting', hits, 0.6);
+  // The distinct fact should surface before the second near-duplicate.
+  const order = reranked.map((h) => h.fact.id).join(',');
+  const distinctIdx = reranked.findIndex((h) => h.fact.id === 'x');
+  const dup2Idx = reranked.findIndex((h) => h.fact.id === 'd2');
+  assert.ok(distinctIdx !== -1 && dup2Idx !== -1, 'both facts present');
+  assert.ok(distinctIdx < dup2Idx, `expected diversity ordering, got ${order}`);
+});
+

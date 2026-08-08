@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ToolDefinition } from '../agent/types.js';
+import { withLock } from './filelock.js';
 
 function safeResolve(workdir: string, p: string): string {
   const base = path.resolve(workdir);
@@ -26,8 +27,10 @@ export function fileTools(): ToolDefinition[] {
       },
       handler: async (args, ctx) => {
         const p = safeResolve(ctx.workdir, String(args.path ?? ''));
-        const buf = await fs.readFile(p);
-        return { path: path.relative(ctx.workdir, p), size: buf.length, text: buf.toString('utf8').slice(0, READ_LIMIT) };
+        return withLock(p, false, async () => {
+          const buf = await fs.readFile(p);
+          return { path: path.relative(ctx.workdir, p), size: buf.length, text: buf.toString('utf8').slice(0, READ_LIMIT) };
+        });
       },
     },
     {
@@ -45,9 +48,11 @@ export function fileTools(): ToolDefinition[] {
       handler: async (args, ctx) => {
         const p = safeResolve(ctx.workdir, String(args.path ?? ''));
         const content = String(args.content ?? '');
-        await fs.mkdir(path.dirname(p), { recursive: true });
-        await fs.writeFile(p, content, 'utf8');
-        return { path: path.relative(ctx.workdir, p), bytes: content.length };
+        return withLock(p, true, async () => {
+          await fs.mkdir(path.dirname(p), { recursive: true });
+          await fs.writeFile(p, content, 'utf8');
+          return { path: path.relative(ctx.workdir, p), bytes: content.length };
+        });
       },
     },
     {
@@ -82,8 +87,10 @@ export function fileTools(): ToolDefinition[] {
       },
       handler: async (args, ctx) => {
         const p = safeResolve(ctx.workdir, String(args.path ?? ''));
-        await fs.rm(p, { recursive: true, force: true });
-        return { deleted: path.relative(ctx.workdir, p) };
+        return withLock(p, true, async () => {
+          await fs.rm(p, { recursive: true, force: true });
+          return { deleted: path.relative(ctx.workdir, p) };
+        });
       },
     },
   ];

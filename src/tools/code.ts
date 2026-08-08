@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ToolDefinition } from '../agent/types.js';
+import { withLock } from './filelock.js';
 
 /**
  * Code tools: the primitives that let Jarv work on code the way an editor does —
@@ -133,29 +134,33 @@ export function codeTools(): ToolDefinition[] {
         const find = String(args.find ?? '');
         const replace = String(args.replace ?? '');
         if (!file || !find) return { ok: false, error: 'code_edit requires path and find' };
-        let content: string;
-        try {
-          content = fs.readFileSync(file, 'utf8');
-        } catch (err) {
-          return { ok: false, error: `cannot read ${file}: ${err instanceof Error ? err.message : String(err)}` };
-        }
-        const first = content.indexOf(find);
-        if (first === -1) return { ok: false, error: `"${find.slice(0, 60)}" not found in ${file}` };
-        const second = content.indexOf(find, first + 1);
-        if (second !== -1) return { ok: false, error: `"${find.slice(0, 60)}" appears more than once in ${file} — narrow the find text` };
-        const line = content.slice(0, first).split('\n').length;
-        const lineStart = content.lastIndexOf('\n', first) + 1;
-        const lineEnd = content.indexOf('\n', first);
-        const before = content.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
-        const next = content.slice(0, first) + replace + content.slice(first + find.length);
-        const afterLineStart = content.slice(0, first).split('\n').slice(0, -1).join('\n');
-        const afterLine = next.slice(afterLineStart.length ? afterLineStart.length + 1 : 0).split('\n')[0] ?? '';
-        try {
-          fs.writeFileSync(file, next);
-        } catch (err) {
-          return { ok: false, error: `cannot write ${file}: ${err instanceof Error ? err.message : String(err)}` };
-        }
-        return { ok: true, file, line, before: before.slice(0, 200), after: afterLine.slice(0, 200) };
+        // Exclusive per-path lock so an edit can't race a parallel read/write of
+        // the same file within the same tool round.
+        return withLock(file, true, async () => {
+          let content: string;
+          try {
+            content = fs.readFileSync(file, 'utf8');
+          } catch (err) {
+            return { ok: false, error: `cannot read ${file}: ${err instanceof Error ? err.message : String(err)}` };
+          }
+          const first = content.indexOf(find);
+          if (first === -1) return { ok: false, error: `"${find.slice(0, 60)}" not found in ${file}` };
+          const second = content.indexOf(find, first + 1);
+          if (second !== -1) return { ok: false, error: `"${find.slice(0, 60)}" appears more than once in ${file} — narrow the find text` };
+          const line = content.slice(0, first).split('\n').length;
+          const lineStart = content.lastIndexOf('\n', first) + 1;
+          const lineEnd = content.indexOf('\n', first);
+          const before = content.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
+          const next = content.slice(0, first) + replace + content.slice(first + find.length);
+          const afterLineStart = content.slice(0, first).split('\n').slice(0, -1).join('\n');
+          const afterLine = next.slice(afterLineStart.length ? afterLineStart.length + 1 : 0).split('\n')[0] ?? '';
+          try {
+            fs.writeFileSync(file, next);
+          } catch (err) {
+            return { ok: false, error: `cannot write ${file}: ${err instanceof Error ? err.message : String(err)}` };
+          }
+          return { ok: true, file, line, before: before.slice(0, 200), after: afterLine.slice(0, 200) };
+        });
       },
     },
   ];

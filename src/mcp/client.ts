@@ -39,6 +39,7 @@ export async function loadExternalMcpTools(servers: McpServerConfig[]): Promise<
           name: `${cfg.name}__${t.name}`,
           description: `${t.description ?? ''}\n(external MCP server: ${cfg.name})`,
           inputSchema: (t.inputSchema ?? { type: 'object', properties: {} }) as ToolDefinition['inputSchema'],
+          mcpServer: cfg.name,
           handler: async (args) => {
             const res = await client.callTool({ name: t.name, arguments: args as Record<string, unknown> });
             return contentToJson(res.content);

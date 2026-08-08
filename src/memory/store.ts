@@ -30,10 +30,30 @@ export class FactStore {
   async add(text: string, source = 'user'): Promise<MemoryFact> {
     await this.ensureLoaded();
     const now = new Date().toISOString();
-    const fact: MemoryFact = { id: randomUUID(), text, source, createdAt: now, updatedAt: now };
+    const fact: MemoryFact = { id: randomUUID(), text, source, createdAt: now, updatedAt: now, accessCount: 0, lastAccessed: now };
     this.facts.push(fact);
     await this.save();
     return fact;
+  }
+
+  /** Increment the rehearsal counters for the given fact ids. Silently ignores
+   *  unknown/missing ids. Returns the updated facts. */
+  async recordAccess(ids: string[]): Promise<MemoryFact[]> {
+    await this.ensureLoaded();
+    const now = new Date().toISOString();
+    let changed = false;
+    const touched: MemoryFact[] = [];
+    for (const id of ids) {
+      const fact = this.facts.find((f) => f.id === id);
+      if (!fact) continue;
+      fact.accessCount = (fact.accessCount ?? 0) + 1;
+      fact.lastAccessed = now;
+      fact.updatedAt = now;
+      touched.push(fact);
+      changed = true;
+    }
+    if (changed) await this.save();
+    return touched;
   }
 
   async remove(id: string): Promise<boolean> {
@@ -53,5 +73,13 @@ export class FactStore {
   async get(id: string): Promise<MemoryFact | undefined> {
     await this.ensureLoaded();
     return this.facts.find((f) => f.id === id);
+  }
+
+  /** Replace the entire fact list (used by dream consolidation). Ids not in the
+   *  new list are dropped; ids preserved keep their vectors valid. */
+  async replaceAll(facts: MemoryFact[]): Promise<void> {
+    await this.ensureLoaded();
+    this.facts = facts;
+    await this.save();
   }
 }

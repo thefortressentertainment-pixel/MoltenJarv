@@ -49,6 +49,8 @@ export interface ToolDefinition {
   system?: BodySystem;
   /** When true, the agent must get explicit human consent before executing (when a consent channel is active). */
   consequential?: boolean;
+  /** Set on tools imported from an external MCP server (namespaced `server__tool`). */
+  mcpServer?: string;
   /**
    * Fail-closed consequential action. When true, the tool is externally visible,
    * irreversible, or otherwise too consequential to ever auto-fire silently.
@@ -65,11 +67,19 @@ export interface ToolContext {
   memory: MemoryService;
   config: JarvGenieConfig;
   workdir: string;
+  /** The live tool registry, when the tool is running inside one (set by the
+   *  registry before invoking a handler). Used by meta-tools like `use_tool`
+   *  that need to dispatch to other registered tools by name. Structurally
+   *  typed to avoid an import cycle with the registry module. */
+  tools?: {
+    execute(name: string, args: Record<string, unknown>, ctx: ToolContext): Promise<{ ok: boolean; result: unknown }>;
+    list(): Array<{ name: string; mcpServer?: string }>;
+  };
 }
 
 export interface MemoryService {
   addFact(text: string, source?: string): Promise<{ id: string }>;
-  recall(query: string, opts?: { k?: number; threshold?: number }): Promise<Array<{ id: string; text: string; score: number }>>;
+  recall(query: string, opts?: { k?: number; threshold?: number }): Promise<Array<{ id: string; text: string; score: number; rawScore?: number }>>;
   listFacts(): Promise<Array<{ id: string; text: string; createdAt: string }>>;
   deleteFact(id: string): Promise<boolean>;
   sessionLoad(sessionId: string): Promise<ChatMessage[]>;

@@ -1,5 +1,6 @@
 import type { JarvGenieConfig } from '../config/index.js';
 import { loadSoul, composeSystemPrompt } from '../config/soul.js';
+import { loadSkills, renderSkills } from '../skills.js';
 import { approvalActive, requireApproval, requireFailClosedApproval, approvalQuestion } from '../approvals.js';
 import type { ModelRouter } from '../providers/index.js';
 import type { ToolRegistry } from '../tools/registry.js';
@@ -103,6 +104,7 @@ export class Agent {
       role: 'system',
       content:
         composeSystemPrompt(config.agent.systemPrompt, loadSoul(config.agent.soulPath)) +
+        (config.agent.skillsPath ? renderSkills(loadSkills(config.agent.skillsPath)) : '') +
         composeRecentContextBlock(history),
     };
     // The session store grows unbounded, so the raw history can exceed any
@@ -195,7 +197,7 @@ export class Agent {
   /** Run one tool call with the consent gate. Returns true if the call errored. */
   private async executeCall(call: ToolCall, messages: ChatMessage[], ctx: ToolContext, toolNames: string[]): Promise<boolean> {
     // Spinal cord: deterministic immune reflexes fire before any deliberation.
-    const spinal = reflex(call);
+    const spinal = reflex(call, ctx.config);
     if (spinal.kind === 'blocked') {
       messages.push({
         role: 'tool',

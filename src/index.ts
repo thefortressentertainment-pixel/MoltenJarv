@@ -25,6 +25,7 @@ import { getTokenStore } from './hub/auth.js';
 import { runMcpServer } from './mcp/server.js';
 import { getLinkStore, RemoteClient } from './remote/client.js';
 import { loadAgentConfig, recordDaemonCrash, resetDaemonCrashCount } from './scheduler/index.js';
+import { runDreamCommand } from './cli/dream.js';
 import { serveUi, type UiServerOptions } from './ui/server.js';
 
 interface Args {
@@ -67,6 +68,7 @@ Usage:
   jarv-genie voice --wake   hands-free: answers when you say "hey jarv" (wake word)
   jarv-genie voice --setup-piper   install neural TTS (Piper) for faster replies
   jarv-genie agent [schedule|list|run|once|remove]     scheduled briefings & reminders
+  jarv-genie dream [--force] [--min-count N]   consolidate long-term memory now
   jarv-genie agent schedule "@daily" "<prompt>" [--notify] [--speak]   add a schedule
   jarv-genie --doctor             check endpoints and memory
   jarv-genie --mcp [--transport http --port 3000]   run as an MCP server
@@ -428,6 +430,12 @@ async function main(): Promise<void> {
       process.exit(0);
     });
     await new Promise(() => {});
+  }
+
+  if (raw[0] === 'dream') {
+    const ctx = await buildAgent();
+    await runDreamCommand(ctx, raw.slice(1));
+    return;
   }
 
   if (raw[0] === 'hub' || raw[0] === 'ui') {

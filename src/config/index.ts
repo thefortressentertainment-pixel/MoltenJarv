@@ -19,6 +19,29 @@ export interface McpServerConfig {
   headers?: Record<string, string>;
 }
 
+/**
+ * A user-defined permission rule, modeled on grok-build's
+ * `config-types/permission.rs` (deny-by-default). Each rule either allows a tool
+ * through to the consent gate, denies it outright, or fast-paths it.
+ *
+ * `action`:
+ *  - `allow` — let the cortex deliberate and the consent gate decide.
+ *  - `deny`   — block deterministically before any model round-trip.
+ *  - `fast`   — treat as a safe routine organ; run without deliberation.
+ *
+ * `tool` selects which tool(s) the rule applies to: an exact name, a `*`
+ * wildcard, or a glob like `file_*`. `pattern` optionally narrows by argument
+ * value (glob or regex), useful for gating e.g. `run_shell` on `rm -rf` in a
+ * path. Omitting `action` never creates a catch-all allow — deny-by-default.
+ */
+export interface PermissionRule {
+  action: 'allow' | 'deny' | 'fast';
+  tool: string;
+  pattern?: string;
+  pattern_mode?: 'glob' | 'regex';
+  reason?: string;
+}
+
 export interface JarvGenieConfig {
   providers: {
     primary: EndpointConfig;
@@ -30,6 +53,8 @@ export interface JarvGenieConfig {
     maxSteps: number;
     workdir: string;
     soulPath?: string;
+    /** Optional skills dir; each `<name>/SKILL.md` is injected into the prompt. */
+    skillsPath?: string;
   };
   memory: {
     dir: string;
@@ -37,6 +62,9 @@ export interface JarvGenieConfig {
   mcp: {
     servers: McpServerConfig[];
   };
+  /** User-defined reflex rules (deny-by-default). Evaluated after the
+   *  non-overridable security invariants (credentials/secrets). */
+  permissions?: PermissionRule[];
   computer?: {
     allowControl?: boolean;
     visionModel?: string;
@@ -78,11 +106,13 @@ export function defaultConfig(): JarvGenieConfig {
       maxSteps: 24,
       workdir: envOr('JARV_GENIE_WORKDIR', path.join(dataHome(), 'workspace')),
       soulPath: path.join(dataHome(), 'soul'),
+      skillsPath: envOr('JARV_GENIE_SKILLS_DIR', path.join(dataHome(), 'skills')),
     },
     memory: {
       dir: envOr('JARV_GENIE_MEMORY_DIR', path.join(dataHome(), 'memory')),
     },
     mcp: { servers: [] },
+    permissions: [],
   };
 }
 

@@ -8,7 +8,10 @@ import { composeRecentContextBlock } from './recentContext.js';
 import { saveCheckpoint, loadCheckpoint, clearCheckpoint, isResumeIntent, type TaskCheckpoint } from './checkpoint.js';
 import { CODE_PLAYBOOK } from '../config/codePlaybook.js';
 import { loadSoul, composeSystemPrompt } from '../config/soul.js';
+import { loadSkills, renderSkills } from '../skills.js';
 import { reflex } from '../reflexes.js';
+import { validateArgs } from '../tools/validate.js';
+import type { Capability } from '../capability.js';
 
 /**
  * Iterative plan→execute loop task runner. Unlike the conversational Agent,
@@ -30,6 +33,8 @@ export interface TaskRunnerOptions {
   config: JarvGenieConfig;
   /** When set, recent conversation is injected for continuity and the exchange is persisted. */
   sessionId?: string;
+  /** Restrict this task to a capability mode (e.g. read-only "plan" mode). */
+  capability?: Capability;
 }
 
 export interface TaskResult {
@@ -58,11 +63,11 @@ export class TaskRunner {
    * otherwise invents memories and calls them on every task.
    */
   private usableTools(input: string): ToolDefinition[] {
-    const all = this.opts.tools.list();
+    const base = this.opts.capability ? this.opts.tools.listForCapability(this.opts.capability) : this.opts.tools.list();
     if (/\b(remember|recall|memor(y|ies)|facts|what do you (know|remember)|do you remember)\b/i.test(input)) {
-      return all;
+      return base;
     }
-    return all.filter((t) => !['remember', 'recall', 'list_facts'].includes(t.name));
+    return base.filter((t) => !['remember', 'recall', 'list_facts'].includes(t.name));
   }
 
   /** The CODE_PLAYBOOK (~2.4KB of repo-coding rules) only earns its place when
@@ -101,7 +106,11 @@ Delivery Track Record (MANDATORY): after ANY shipped task — an investor-digest
     // Append the soul persona (SOUL.md) when present, so Telegram/hub chats
     // carry the same persistent identity as the full agent. Matches Agent.loop.
     const soulPath = this.opts.config?.agent?.soulPath;
-    return soulPath ? composeSystemPrompt(base, loadSoul(soulPath)) : base;
+    const withSoul = soulPath ? composeSystemPrompt(base, loadSoul(soulPath)) : base;
+    // Append always-on skills (JARV_HOME/skills/<name>/SKILL.md).
+    const skillsPath = this.opts.config?.agent?.skillsPath;
+    const withSkills = skillsPath ? withSoul + renderSkills(loadSkills(skillsPath)) : withSoul;
+    return withSkills;
   }
 
   private async execute(calls: ToolCall[], allowed: Set<string>): Promise<Array<Record<string, unknown>>> {
@@ -147,7 +156,7 @@ Delivery Track Record (MANDATORY): after ANY shipped task — an investor-digest
       // Spinal cord: deterministic reflexes fire before the cortex can be
       // consulted again. Immune blocks refuse outright; fast organs mark the
       // call as safe to run without further deliberation.
-      const spinal = reflex(call);
+      const spinal = reflex(call, ctx.config);
       if (spinal.kind === 'blocked') {
         results.push({ tool: call.name, error: spinal.reason ?? 'blocked by reflex' });
         continue;
@@ -162,9 +171,15 @@ Delivery Track Record (MANDATORY): after ANY shipped task — an investor-digest
         results.push({ tool: call.name, error: `unknown tool` });
         continue;
       }
-      const missing = (def.inputSchema.required ?? []).filter((r) => call.arguments[r] === undefined || call.arguments[r] === '');
-      if (missing.length > 0) {
-        results.push({ tool: call.name, error: `missing required argument(s): ${missing.join(', ')}` });
+      // Structured arg validation so the model gets a path-bearing, actionable
+      // error (see src/tools/validate.ts) instead of an opaque cast failure.
+      const { errors } = validateArgs(def, call.arguments);
+      if (errors.length > 0) {
+        results.push({
+          tool: call.name,
+          ok: false,
+          result: { error: `invalid argument(s): ${errors[0]!.message}`, issues: errors },
+        });
         continue;
       }
       if (def.consequential) {
