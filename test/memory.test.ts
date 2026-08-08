@@ -94,6 +94,27 @@ test('FactStore.recordAccess increments counters and persists', async () => {
   }
 });
 
+test("FactStore.update replaces text in place (update-don't-duplicate)", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'jarv-upd-'));
+  try {
+    const store = new FactStore(path.join(dir, 'facts.json'));
+    const a = await store.add('user likes dark mode');
+    const before = (await store.list()).length;
+
+    const updated = await store.update(a.id, 'user prefers light mode');
+    assert.ok(updated, 'update returns the fact');
+    assert.strictEqual(updated!.text, 'user prefers light mode');
+    // The fact count is unchanged — we corrected, not duplicated.
+    assert.strictEqual((await store.list()).length, before);
+    assert.strictEqual((await store.get(a.id))?.text, 'user prefers light mode');
+
+    // Unknown id → undefined.
+    assert.strictEqual(await store.update('missing', 'x'), undefined);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('temporal decay hits old session facts but exempts evergreen', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'jarv-decay-'));
   try {

@@ -24,6 +24,13 @@ export class Memory implements MemoryService {
     return { id: fact.id };
   }
 
+  /** Update-don't-duplicate: replace a fact's text by id. Returns the new id, or
+   *  null when the id is unknown. */
+  async updateFact(id: string, text: string): Promise<{ id: string } | null> {
+    const fact = await this.store.update(id, text);
+    return fact ? { id: fact.id } : null;
+  }
+
   async recall(query: string, opts?: { k?: number; threshold?: number }): Promise<Array<{ id: string; text: string; score: number; rawScore?: number }>> {
     const facts = await this.store.list();
     const hits = await this.search.search(query, facts, opts?.k ?? 5, opts?.threshold ?? 0.2);

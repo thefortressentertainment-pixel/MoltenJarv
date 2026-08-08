@@ -11,6 +11,7 @@ import {
 } from '../scheduler/index.js';
 import type { ChatBackend } from './backend.js';
 import { speak as ttsSpeak } from '../voice/index.js';
+import { WakeStore } from '../selfwake.js';
 
 function notify(text: string): void {
   if (process.platform !== 'darwin') return;
@@ -24,8 +25,7 @@ export async function runAgentSchedule(cfg: AgentConfig, backend: ChatBackend): 
   if (isBusy()) {
     process.stdout.write('[jarv-genie] busy — skipping schedules this tick\n');
     return;
-  }
-  const state = loadAgentState();
+  }  const state = loadAgentState();
   const now = new Date();
   // Zero-pad month/day so the key round-trips through `new Date()` correctly.
   // (getMonth() is 0-indexed — writing it bare produced "2026-7-5" which
@@ -60,6 +60,22 @@ export async function runAgentSchedule(cfg: AgentConfig, backend: ChatBackend): 
     }
   }
   if (done.length > 0) saveAgentState(state);
+}
+
+/** Poll the self-wake store and re-invoke the agent for any fired wakes. */
+export async function runDueWakes(stateDir: string, backend: ChatBackend): Promise<void> {
+  const store = new WakeStore(stateDir);
+  const fired = await store.pollDue();
+  if (fired.length === 0) return;
+  for (const w of fired) {
+    process.stdout.write(`[jarv-genie] wake fired: ${w.prompt}\n`);
+    try {
+      const result = await backend.chat(w.prompt);
+      process.stdout.write(`\n[jarv] ${result.text}\n`);
+    } catch (err) {
+      process.stdout.write(`[jarv-genie] wake ${w.id} failed: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+  }
 }
 
 async function deliver(text: string, s: { notify?: boolean; speak?: boolean }, cfg: AgentConfig, backend: ChatBackend): Promise<void> {

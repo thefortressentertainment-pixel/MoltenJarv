@@ -2,6 +2,7 @@ import type { ToolContext, ToolDefinition, BodySystem } from '../agent/types.js'
 import fs from 'node:fs';
 import { validateArgs } from './validate.js';
 import { filterByCapability, capabilityCovers, toolCapability, type Capability } from '../capability.js';
+import { makeRootsHandle } from '../roots.js';
 
 export interface ExecutionResult {
   ok: boolean;
@@ -141,8 +142,14 @@ export class ToolRegistry {
         return { ok: false, result: { error: `invalid argument(s): ${errors[0]!.message}`, issues: errors } };
       }
       // Give the handler a handle back to this registry so meta-tools like
-      // `use_tool` can dispatch to other registered tools by name.
-      const result = await tool.handler(coerced, { ...ctx, tools: this });
+      // `use_tool` can dispatch to other registered tools by name, and the
+      // writable-roots sandbox so file tools can enforce write-scoping.
+      const roots = makeRootsHandle({
+        workdir: ctx.workdir,
+        readRoots: ctx.config?.agent?.extraReadRoots ?? [],
+        enabled: true,
+      });
+      const result = await tool.handler(coerced, { ...ctx, tools: this, roots });
       return { ok: true, result };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

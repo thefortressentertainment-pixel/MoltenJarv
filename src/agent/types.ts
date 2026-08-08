@@ -49,6 +49,9 @@ export interface ToolDefinition {
   system?: BodySystem;
   /** When true, the agent must get explicit human consent before executing (when a consent channel is active). */
   consequential?: boolean;
+  /** Intrinsic side-effect category (see src/risk.ts). Overrides the consequential
+   *  default classification: read | write-local | exec | external. */
+  risk?: 'read' | 'write-local' | 'exec' | 'external';
   /** Set on tools imported from an external MCP server (namespaced `server__tool`). */
   mcpServer?: string;
   /**
@@ -67,6 +70,12 @@ export interface ToolContext {
   memory: MemoryService;
   config: JarvGenieConfig;
   workdir: string;
+  /** Writable/read-only roots sandboxing the file tools (see src/roots.ts). */
+  roots?: {
+    underAnyRoot(request: string): boolean;
+    underWritableRoot(request: string): boolean;
+    renderBoundary(): string;
+  };
   /** The live tool registry, when the tool is running inside one (set by the
    *  registry before invoking a handler). Used by meta-tools like `use_tool`
    *  that need to dispatch to other registered tools by name. Structurally
@@ -79,6 +88,7 @@ export interface ToolContext {
 
 export interface MemoryService {
   addFact(text: string, source?: string): Promise<{ id: string }>;
+  updateFact(id: string, text: string): Promise<{ id: string } | null>;
   recall(query: string, opts?: { k?: number; threshold?: number }): Promise<Array<{ id: string; text: string; score: number; rawScore?: number }>>;
   listFacts(): Promise<Array<{ id: string; text: string; createdAt: string }>>;
   deleteFact(id: string): Promise<boolean>;

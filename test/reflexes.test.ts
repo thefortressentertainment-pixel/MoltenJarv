@@ -105,3 +105,24 @@ test('empty permissions fall back to built-in defaults', () => {
   assert.strictEqual(reflex(call('run_shell', { command: 'ls' }), cfg([])).kind, 'pass');
 });
 
+test('P5: a run_shell allow/fast rule auto-approves only operator-free tokenized-prefix commands', () => {
+  const allowed = cfg([{ action: 'fast', tool: 'run_shell', pattern: 'git status' }]);
+  // Safe: allows `git status` and the token-prefix `git status -s`.
+  assert.strictEqual(reflex(call('run_shell', { command: 'git status' }), allowed).kind, 'fast');
+  assert.strictEqual(reflex(call('run_shell', { command: 'git status -s' }), allowed).kind, 'fast');
+  // A chained operator must NOT ride the fast-path — falls through to consent.
+  assert.strictEqual(reflex(call('run_shell', { command: 'git status && rm -rf ~' }), allowed).kind, 'pass');
+  // A non-prefix command (git statusfoo / git checkout) does not match.
+  assert.strictEqual(reflex(call('run_shell', { command: 'git statusfoo' }), allowed).kind, 'pass');
+  assert.strictEqual(reflex(call('run_shell', { command: 'git checkout main' }), allowed).kind, 'pass');
+});
+
+test('P5: a bare allow rule still rejects shell operators and blocked verbs', () => {
+  // A fast rule with no pattern auto-approves any safe command...
+  const fast = cfg([{ action: 'fast', tool: 'run_shell' }]);
+  assert.strictEqual(reflex(call('run_shell', { command: 'ls' }), fast).kind, 'fast');
+  // ...but chained operators or destructive verbs drop back to the consent gate.
+  assert.strictEqual(reflex(call('run_shell', { command: 'ls; rm -rf /' }), fast).kind, 'pass');
+  assert.strictEqual(reflex(call('run_shell', { command: 'sudo rm -rf /' }), fast).kind, 'pass');
+});
+

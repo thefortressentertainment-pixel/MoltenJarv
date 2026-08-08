@@ -14,6 +14,42 @@ import type { ToolCall } from './agent/types.js';
 
 export type RuleDecision = { action: 'allow' | 'deny' | 'fast' } | null;
 
+/**
+ * Shell metacontrol operators that disqualify a command from auto-approval.
+ * Modeled on openworker's shell gate (`permissions.py:21-25`): allow-listing
+ * `git status` must never auto-run as the head of `git status && rm -rf ~`.
+ * Any command containing these must NOT be auto-approved — it goes to consent.
+ */
+const SHELL_OPERATOR_RE = /[;&|><`"']|\$\{|\b(?:&&|\|\|)\b|\b(?:rm|sudo|shutdown|reboot|halt|mkfs|dd)\b|\r?\n/;
+
+function hasShellOperator(command: string): boolean {
+  return SHELL_OPERATOR_RE.test(command);
+}
+
+/** Tokenize a command like a POSIX shell does for prefix comparison: split on
+ *  runs of whitespace, stripping balancing quotes. `git status` matches
+ *  `git status -s` but never `git statusfoo`. */
+export function tokenizeCommand(command: string): string[] {
+  return command
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t.length > 0)
+    .map((t) => t.replace(/^(['"])(.*)\1$/, '$2'));
+}
+
+/** True when `pattern`'s tokens are a prefix of the (tokenized) command. This is
+ *  the safe, token-conscious form of command auto-approval matching. */
+export function tokenizedPrefixMatch(pattern: string, command: string): boolean {
+  const pat = tokenizeCommand(pattern);
+  const cmd = tokenizeCommand(command);
+  if (pat.length === 0) return false;
+  if (cmd.length < pat.length) return false;
+  for (let i = 0; i < pat.length; i++) {
+    if (pat[i] !== cmd[i]) return false;
+  }
+  return true;
+}
+
 /** Match a `tool` selector (exact name, `*`, or glob) against a tool name. */
 function toolMatches(selector: string, name: string): boolean {
   if (selector === '*' || selector === name) return true;
@@ -68,17 +104,40 @@ export function evaluatePermissions(call: ToolCall, rules: PermissionRule[] = []
   for (const rule of rules) {
     const tool = typeof rule.tool === 'string' ? rule.tool : '';
     if (!tool || !toolMatches(tool, call.name)) continue;
-    if (rule.pattern && !patternMatches(rule.pattern, rule.pattern_mode, call)) continue;
+
+    // Shell rules match commands with tokenized-PREFIX semantics (openworker):
+    // `git status` matches `git status -s` but never `git statusfoo`, and a
+    // pattern-less shell rule auto-approves only operator-free commands.
+    const isShell = call.name === 'run_shell';
+    const command = String((call.arguments ?? {}).command ?? '').trim();
+    if (rule.pattern) {
+      if (isShell && rule.pattern_mode !== 'regex') {
+        if (!command || !tokenizedPrefixMatch(rule.pattern, command)) continue;
+      } else if (!patternMatches(rule.pattern, rule.pattern_mode, call)) {
+        continue;
+      }
+    }
+
     // First rule that selects this tool (+ optional pattern) wins.
+    let decision: RuleDecision;
     switch (rule.action) {
       case 'deny':
-        return { action: 'deny' };
+        decision = { action: 'deny' as const };
+        break;
       case 'fast':
-        return { action: 'fast' };
+        decision = { action: 'fast' as const };
+        break;
       case 'allow':
       default:
-        return { action: 'allow' };
+        decision = { action: 'allow' as const };
     }
+    // Shell safety gate: an auto-approval/fast-path rule must never fire on a
+    // command that chains operators or uses a destructive verb — that would let
+    // `git status && rm -rf ~` sneak past an allow-rule for `git`.
+    if (isShell && (decision.action === 'allow' || decision.action === 'fast')) {
+      if (!command || hasShellOperator(command)) continue;
+    }
+    return decision;
   }
   return null;
 }

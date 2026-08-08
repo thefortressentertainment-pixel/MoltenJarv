@@ -55,6 +55,8 @@ export interface JarvGenieConfig {
     soulPath?: string;
     /** Optional skills dir; each `<name>/SKILL.md` is injected into the prompt. */
     skillsPath?: string;
+    /** Additional read-only roots the agent may read from (see src/roots.ts). */
+    extraReadRoots?: string[];
   };
   memory: {
     dir: string;
@@ -107,6 +109,7 @@ export function defaultConfig(): JarvGenieConfig {
       workdir: envOr('JARV_GENIE_WORKDIR', path.join(dataHome(), 'workspace')),
       soulPath: path.join(dataHome(), 'soul'),
       skillsPath: envOr('JARV_GENIE_SKILLS_DIR', path.join(dataHome(), 'skills')),
+      extraReadRoots: [],
     },
     memory: {
       dir: envOr('JARV_GENIE_MEMORY_DIR', path.join(dataHome(), 'memory')),

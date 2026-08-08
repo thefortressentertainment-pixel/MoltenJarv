@@ -7,6 +7,7 @@ import {
   removeSchedule,
   runAdHoc,
   runAgentSchedule,
+  runDueWakes,
   runScheduleNow,
 } from './cli/agent.js';
 import { localBackend, remoteBackend } from './cli/backend.js';
@@ -20,7 +21,7 @@ import { runVoiceSession, runWakeSession, type VoiceSessionOptions } from './cli
 import { phoneCommand } from './cli/phone.js';
 import { installPiper } from './voice/index.js';
 import { ensureConfigFile } from './config/index.js';
-import { VERSION } from './config/defaults.js';
+import { VERSION, dataHome } from './config/defaults.js';
 import { getTokenStore } from './hub/auth.js';
 import { runMcpServer } from './mcp/server.js';
 import { getLinkStore, RemoteClient } from './remote/client.js';
@@ -407,6 +408,7 @@ async function main(): Promise<void> {
     const tick = async () => {
       try {
         await runAgentSchedule(loadAgentConfig(), backend);
+        await runDueWakes(dataHome(), backend);
         cleanTicks++;
         if (cleanTicks >= CLEAN_RESET) {
           resetDaemonCrashCount();

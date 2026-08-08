@@ -27,13 +27,29 @@ export class FactStore {
     await fs.writeFile(this.file, JSON.stringify(this.facts, null, 2) + '\n');
   }
 
-  async add(text: string, source = 'user'): Promise<MemoryFact> {
+  async add(text: string, source = 'user', summary?: string): Promise<MemoryFact> {
     await this.ensureLoaded();
     const now = new Date().toISOString();
-    const fact: MemoryFact = { id: randomUUID(), text, source, createdAt: now, updatedAt: now, accessCount: 0, lastAccessed: now };
+    const fact: MemoryFact = { id: randomUUID(), text, source, createdAt: now, updatedAt: now, accessCount: 0, lastAccessed: now, ...(summary ? { summary } : {}) };
     this.facts.push(fact);
     await this.save();
     return fact;
+  }
+
+  /** Update-don't-duplicate: replace a fact's text (and optional summary) by id,
+   *  bumping the updated timestamp. Returns the updated fact, or undefined if the
+   *  id is unknown. */
+  async update(id: string, text: string, summary?: string): Promise<MemoryFact | undefined> {
+    await this.ensureLoaded();
+    const fact = this.facts.find((f) => f.id === id);
+    if (!fact) return undefined;
+    const now = new Date().toISOString();
+    fact.text = text;
+    fact.updatedAt = now;
+    if (summary !== undefined) fact.summary = summary;
+    else delete fact.summary;
+    await this.save();
+    return { ...fact };
   }
 
   /** Increment the rehearsal counters for the given fact ids. Silently ignores

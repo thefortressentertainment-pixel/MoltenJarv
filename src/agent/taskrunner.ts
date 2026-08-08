@@ -12,6 +12,8 @@ import { loadSkills, renderSkills } from '../skills.js';
 import { reflex } from '../reflexes.js';
 import { validateArgs } from '../tools/validate.js';
 import type { Capability } from '../capability.js';
+import { compactWorkingContext } from './compaction.js';
+import { buildRoots, renderRootsBoundary } from '../roots.js';
 
 /**
  * Iterative plan→execute loop task runner. Unlike the conversational Agent,
@@ -110,7 +112,12 @@ Delivery Track Record (MANDATORY): after ANY shipped task — an investor-digest
     // Append always-on skills (JARV_HOME/skills/<name>/SKILL.md).
     const skillsPath = this.opts.config?.agent?.skillsPath;
     const withSkills = skillsPath ? withSoul + renderSkills(loadSkills(skillsPath)) : withSoul;
-    return withSkills;
+    // Append the writable-roots sandbox boundary so the model knows what it may touch.
+    const workdir = this.opts.config?.agent?.workdir;
+    const rootsBoundary = workdir
+      ? renderRootsBoundary(buildRoots({ workdir, readRoots: this.opts.config?.agent?.extraReadRoots ?? [] }))
+      : '';
+    return withSkills + (rootsBoundary ? `\n\n${rootsBoundary}` : '');
   }
 
   private async execute(calls: ToolCall[], allowed: Set<string>): Promise<Array<Record<string, unknown>>> {
@@ -206,23 +213,27 @@ Delivery Track Record (MANDATORY): after ANY shipped task — an investor-digest
 
   /**
    * The working context grows by a full assistant+tool round every step, so a
-   * long task would blow the model's context window long before the step
-   * budget is spent. Drop the oldest COMPLETE rounds (an assistant tool-call
-   * turn together with its tool results — never a dangling pair) until the
-   * context fits, preserving the original instruction and the newest work.
+   * long task would blow the model's context window. Auto-compaction replaces the
+   * over-budget prefix with a summary + mechanical working state + verbatim tail
+   * (openworker-style, outbound-only). If the summarizer is unavailable or the
+   * context is too small to summarize, fall back to dropping the oldest COMPLETE
+   * rounds (an assistant tool-call turn together with its tool results — never a
+   * dangling pair), preserving the original instruction and the newest work.
    */
-  private trimWorkingContext(messages: ChatMessage[]): ChatMessage[] {
-    const budget = 100_000; // ~25k tokens, leaves room for system + tools
-    let size = messages.reduce((n, m) => n + (m.content ?? '').length, 0);
-    if (size <= budget) return messages;
+  private async prepareContext(messages: ChatMessage[]): Promise<ChatMessage[]> {
+    // Only bother compaction when we're meaningfully over budget.
+    const size = messages.reduce((n, m) => n + (m.content ?? '').length, 0);
+    if (size <= 100_000) return messages;
+    const compacted = await compactWorkingContext(messages, { router: this.opts.router });
+    if (compacted.compacted) return compacted.messages;
+    // Fallback: mechanical round-drop.
+    const budget = 100_000;
     let out = [...messages];
     let guard = 0;
-    while (out.length > 2 && size > budget && guard < 50) {
+    while (out.length > 2 && out.reduce((n, m) => n + (m.content ?? '').length, 0) > budget && guard < 50) {
       guard++;
       const next = this.dropOldestRound(out);
-      if (next.length === out.length) break; // nothing droppable
-      const removed = next.length - out.length;
-      size -= out.slice(0, removed).reduce((n, m) => n + (m.content ?? '').length, 0);
+      if (next.length === out.length) break;
       out = next;
     }
     return out;
@@ -299,7 +310,7 @@ Delivery Track Record (MANDATORY): after ANY shipped task — an investor-digest
 
     while (steps < this.budget()) {
       steps++;
-      messages = this.trimWorkingContext(messages);
+      messages = await this.prepareContext(messages);
       const chat = await this.opts.router.chat({ messages, tools: usable });
       provider = chat.provider;
       model = chat.model;
@@ -409,7 +420,7 @@ Delivery Track Record (MANDATORY): after ANY shipped task — an investor-digest
 
     while (steps < this.budget()) {
       steps++;
-      messages = this.trimWorkingContext(messages);
+      messages = await this.prepareContext(messages);
       const buffered: string[] = [];
       const chat = await this.opts.router.streamChat(
         { messages, tools: usable },

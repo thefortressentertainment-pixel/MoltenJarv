@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { ToolDefinition } from '../agent/types.js';
+import type { ToolContext, ToolDefinition } from '../agent/types.js';
 import { withLock } from './filelock.js';
 
 function safeResolve(workdir: string, p: string): string {
@@ -10,6 +10,15 @@ function safeResolve(workdir: string, p: string): string {
     throw new Error(`Path escapes the workspace: ${p}`);
   }
   return target;
+}
+
+/** Enforce the writable-roots sandbox for write/delete operations: the resolved
+ *  path must land inside a writable root (fallback: the workspace, matching prior
+ *  behavior). Throws when it would write outside the sandbox. */
+function assertWritable(p: string, ctx: { roots?: ToolContext['roots'] }): void {
+  if (ctx.roots && !ctx.roots.underWritableRoot(p)) {
+    throw new Error(`Write refused: ${p} is outside any writable root (see sandbox boundary)`);
+  }
 }
 
 const READ_LIMIT = 1_000_000;
@@ -49,6 +58,7 @@ export function fileTools(): ToolDefinition[] {
         const p = safeResolve(ctx.workdir, String(args.path ?? ''));
         const content = String(args.content ?? '');
         return withLock(p, true, async () => {
+          assertWritable(p, ctx);
           await fs.mkdir(path.dirname(p), { recursive: true });
           await fs.writeFile(p, content, 'utf8');
           return { path: path.relative(ctx.workdir, p), bytes: content.length };
@@ -88,6 +98,7 @@ export function fileTools(): ToolDefinition[] {
       handler: async (args, ctx) => {
         const p = safeResolve(ctx.workdir, String(args.path ?? ''));
         return withLock(p, true, async () => {
+          assertWritable(p, ctx);
           await fs.rm(p, { recursive: true, force: true });
           return { deleted: path.relative(ctx.workdir, p) };
         });

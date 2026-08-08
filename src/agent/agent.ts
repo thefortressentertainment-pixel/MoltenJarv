@@ -1,6 +1,7 @@
 import type { JarvGenieConfig } from '../config/index.js';
 import { loadSoul, composeSystemPrompt } from '../config/soul.js';
 import { loadSkills, renderSkills } from '../skills.js';
+import { buildRoots, renderRootsBoundary } from '../roots.js';
 import { approvalActive, requireApproval, requireFailClosedApproval, approvalQuestion } from '../approvals.js';
 import type { ModelRouter } from '../providers/index.js';
 import type { ToolRegistry } from '../tools/registry.js';
@@ -105,6 +106,9 @@ export class Agent {
       content:
         composeSystemPrompt(config.agent.systemPrompt, loadSoul(config.agent.soulPath)) +
         (config.agent.skillsPath ? renderSkills(loadSkills(config.agent.skillsPath)) : '') +
+        (config.agent.workdir
+          ? '\n\n' + renderRootsBoundary(buildRoots({ workdir: config.agent.workdir, readRoots: config.agent.extraReadRoots ?? [] }))
+          : '') +
         composeRecentContextBlock(history),
     };
     // The session store grows unbounded, so the raw history can exceed any

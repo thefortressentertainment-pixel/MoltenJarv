@@ -71,6 +71,12 @@ test('memoryTools and registry round-trip', async () => {
       facts.push(f);
       return f;
     },
+    updateFact: async (id: string, text: string) => {
+      const f = facts.find((x) => x.id === id);
+      if (!f) return null;
+      f.text = text;
+      return { id };
+    },
     recall: async () => facts.map((f) => ({ fact: f, score: 1 })),
     listFacts: async () => facts,
     deleteFact: async () => true,
@@ -80,6 +86,8 @@ test('memoryTools and registry round-trip', async () => {
   registry.registerMany(memoryTools());
   assert.ok(registry.has('remember'));
   assert.ok(registry.has('recall'));
+  assert.ok(registry.has('memory_update'));
+  assert.ok(registry.has('memory_read'));
 
   const ctx = { workdir: '/tmp', config: {}, memory: fakeMemory } as unknown as ToolContext;
   const res = await registry.execute('remember', { text: 'prefer tea over coffee' }, ctx);
@@ -92,6 +100,15 @@ test('memoryTools and registry round-trip', async () => {
 
   const missing = await registry.execute('nope', {}, ctx);
   assert.strictEqual(missing.ok, false);
+
+  // Update-don't-duplicate via the tool.
+  const upd = await registry.execute('memory_update', { id: 'id-0', text: 'prefer green tea' }, ctx);
+  assert.strictEqual(upd.ok, true);
+  assert.strictEqual(facts.length, 1, 'update must not add a fact');
+  assert.strictEqual(facts[0]!.text, 'prefer green tea');
+
+  const bad = await registry.execute('memory_update', { id: 'nope', text: 'x' }, ctx);
+  assert.strictEqual(bad.ok, false);
 });
 
 test('computerTools gate control actions behind allowControl', async () => {
