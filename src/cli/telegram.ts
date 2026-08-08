@@ -202,6 +202,7 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
     memory: ctx.memory,
     config: ctx.config,
     sessionId: 'chat',
+    trustedChatId: chatId ?? undefined,
   });
   const client = new TelegramClient(token);
   const me = await client.getMe();
@@ -359,6 +360,7 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
       const submitted = verifyMatch[1]!.trim();
       if (verifyPairingCode(submitted)) {
         chatId = String(from);
+        runner.setTrustedChatId(chatId);
         secrets.set('TELEGRAM_CHAT_ID', chatId);
         pairTrustedDevice(from);
         process.stdout.write(`[jarv-genie] paired trusted device chat ${chatId}\n`);

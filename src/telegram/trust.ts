@@ -106,6 +106,24 @@ const TRUST_FILE = 'trusted-device.json';
 interface TrustRecord {
   chatId: string;
   pairedAt: string;
+  policy?: Policy;
+}
+
+export interface Policy {
+  mode: 'confirm' | 'execute';
+  fullAuto: string[];
+  neverAuto: string[];
+}
+
+/** Tools that should always require explicit confirmation from a verified device
+ *  unless the operator explicitly adds them to fullAuto. These are irreversible /
+ *  off-machine or can permanently damage the system. */
+export const DEFAULT_NEVER_AUTO = [
+  'shutdown', 'email_send', 'telegram_send', 'moltbook_post', 'moltbook_reply',
+];
+
+function defaultPolicy(): Policy {
+  return { mode: 'confirm', fullAuto: [], neverAuto: [...DEFAULT_NEVER_AUTO] };
 }
 
 function trustFile(): string {
@@ -143,6 +161,76 @@ export function isTrustedDevice(chatId: string | number | undefined): boolean {
   if (chatId === undefined || chatId === null) return false;
   const trusted = trustedDeviceChatId();
   return trusted !== null && String(chatId) === trusted;
+}
+
+/** The trusted-executor policy for the verified device (defaults when none). */
+export function trustedPolicy(): Policy {
+  const record = readTrust();
+  return record?.policy ?? defaultPolicy();
+}
+
+/** Which tools are in full-auto for the verified device. */
+export function fullAutoSet(): Set<string> {
+  return new Set(trustedPolicy().fullAuto);
+}
+
+/** Which tools always confirm (never-auto) for the verified device. */
+export function neverAutoSet(): Set<string> {
+  return new Set(trustedPolicy().neverAuto);
+}
+
+/** Whether the verified device is in full 'execute' autonomy mode. */
+export function executeMode(): boolean {
+  return trustedPolicy().mode === 'execute';
+}
+
+export type ExecutorDecision = 'run' | 'ask' | 'not-trusted';
+
+/**
+ * Decide whether a tool runs without asking, for a given (trusted) sender.
+ *  - not-trusted: caller must enforce the hard gate (never execute).
+ *  - run:        the verified device may execute this tool without asking.
+ *  - ask:        requires explicit confirmation (default when not in execute mode
+ *                or not in fullAuto, or in neverAuto and not explicitly in fullAuto).
+ * Full autonomy is therefore ALWAYS bounded by the explicit `fullAuto` allowlist;
+ * it never extends to unknown tools or to never-auto tools not explicitly relaxed.
+ */
+export function executorDecision(toolName: string, chatId: string | number | undefined): ExecutorDecision {
+  if (!isTrustedDevice(chatId)) return 'not-trusted';
+  if (!executeMode()) return 'ask'; // default tier = confirm (existing behavior)
+  const fullAuto = fullAutoSet();
+  if (toolName && fullAuto.has(toolName)) return 'run';
+  return 'ask';
+}
+
+/**
+ * Configure the policy.
+ *  - addAuto / removeAuto: edit the fullAuto allowlist.
+ *  - toggleMode('execute' | 'confirm').
+ * Returns the updated policy.
+ */
+export function configurePolicy(update: {
+  mode?: 'confirm' | 'execute';
+  addAuto?: string[];
+  removeAuto?: string[];
+}): Policy {
+  const record = readTrust();
+  if (!record) throw new Error('no trusted device yet — run `jarv-genie pair` first');
+  const policy: Policy = record.policy ?? defaultPolicy();
+  if (update.mode) policy.mode = update.mode;
+  const add = new Set(policy.fullAuto);
+  let changedAdd = false;
+  for (const t of update.addAuto ?? []) {
+    if (t && !add.has(t)) { add.add(t); changedAdd = true; }
+  }
+  if (changedAdd) policy.fullAuto = [...add];
+  if (update.removeAuto && update.removeAuto.length > 0) {
+    const remove = new Set(update.removeAuto);
+    policy.fullAuto = policy.fullAuto.filter((t) => !remove.has(t));
+  }
+  record.policy = policy;
+  writeTrust(record);
+  return policy;
 }
 
 /** For tests: clear the on-disk trust record. */

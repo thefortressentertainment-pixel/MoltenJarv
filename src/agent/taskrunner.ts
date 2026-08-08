@@ -14,6 +14,7 @@ import { validateArgs } from '../tools/validate.js';
 import type { Capability } from '../capability.js';
 import { compactWorkingContext } from './compaction.js';
 import { buildRoots, renderRootsBoundary } from '../roots.js';
+import { executorDecision } from '../telegram/trust.js';
 
 /**
  * Iterative plan→execute loop task runner. Unlike the conversational Agent,
@@ -37,6 +38,9 @@ export interface TaskRunnerOptions {
   sessionId?: string;
   /** Restrict this task to a capability mode (e.g. read-only "plan" mode). */
   capability?: Capability;
+  /** The verified/owner chat id for the current run, if any — used to decide
+   *  trusted-executor auto-run vs. ask. May be updated live (see below). */
+  trustedChatId?: string;
 }
 
 export interface TaskResult {
@@ -49,6 +53,11 @@ export interface TaskResult {
 
 export class TaskRunner {
   constructor(private opts: TaskRunnerOptions) {}
+
+  /** Set/update the active trusted chat id (e.g. once the bridge pairs a device). */
+  setTrustedChatId(id: string | undefined): void {
+    this.opts.trustedChatId = id;
+  }
 
   /** Effective step budget at this moment. Under "yes all" auto-approve the
    *  human is out of the wait-loop, so grant a generous ceiling (10× the
@@ -125,15 +134,27 @@ Delivery Track Record (MANDATORY): after ANY shipped task — an investor-digest
     const tools = this.opts.tools.list();
     const results: Array<Record<string, unknown>> = [];
 
+    // Trusted-executor: a verified device in execute mode with the tool on its
+    // full-auto allowlist runs that tool without asking (never for unknown tools
+    // or never-auto tools not explicitly relaxed).
+    const autoRun = new Set<string>();
+    if (this.opts.trustedChatId) {
+      for (const call of calls) {
+        if (executorDecision(call.name, this.opts.trustedChatId) === 'run') autoRun.add(call.name);
+      }
+    }
+
     // Batch consent: if a consent channel is active and any of this round's
     // calls are consequential, ask ONCE for the whole batch instead of one
-    // approval per call.
+    // approval per call. Trusted-executor auto-run calls are excluded from the
+    // batch (they execute without asking).
     let batchApproved: boolean | null = null;
     // Set when a fail-closed tool couldn't get consent because no channel is
     // present. Every fail-closed call in this round is then refused.
     let failClosedBlocked: string | null = null;
     const consequential = calls
       .filter((c) => allowed.has(c.name))
+      .filter((c) => !autoRun.has(c.name))
       .map((c) => tools.find((t) => t.name === c.name))
       .filter((d) => d?.consequential);
     const hasFailClosed = consequential.some((d) => d?.failClosed);
@@ -189,7 +210,7 @@ Delivery Track Record (MANDATORY): after ANY shipped task — an investor-digest
         });
         continue;
       }
-      if (def.consequential) {
+      if (def.consequential && !autoRun.has(call.name)) {
         // A fail-closed tool with no active consent channel was blocked by the
         // batch gate above → refuse it specifically.
         if (def.failClosed && failClosedBlocked) {
