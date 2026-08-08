@@ -79,10 +79,12 @@ consent gate. Nothing is implemented yet; working tree clean at `503f96f`.
 
 ## Status
 
-- **A2 done** `src/web/channels.ts` — multi-backend channel table (web, web_search,
-  github, youtube, rss, semantic_search), ordered `activeBackend()` probing,
-  `internetChannelsDoctor()` report, rendered into `jarv-genie --doctor`.
-  Injectable probes (tests use fakes, no network/CLI). 286 tests passing.
-- **A1 (tools)** — next: `youtube_transcript`, `read_rss`, `github_search/read`,
-  route web via `activeBackend()`.
-- **A3 (credential passthrough)** — later.
+- **A2 done** `src/web/channels.ts` — multi-backend channel table + `doctor` wired
+  into `jarv-genie --doctor`. Injectable probes.
+- **A1 done** `src/tools/network.ts` + 4 new tools on `webTools()`:
+  `youtube_transcript` (yt-dlp), `read_rss` (feedparser), `github_search`/`github_read`
+  (gh CLI). Each routes through `activeBackend()` and returns a clean "backend not
+  configured" hint when the route is down. Verified live via `gh` on this Mac.
+  289 tests passing.
+- **A3 (credential passthrough)** — remaining: wire any platform creds through the
+  secret store (never the prompt), read-only defaults.

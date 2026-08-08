@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '../agent/types.js';
+import { youtubeTranscript, readRss, githubSearch, githubRepoInfo } from './network.js';
 
 export interface WebResult {
   title: string;
@@ -49,6 +50,83 @@ export function webTools(): ToolDefinition[] {
         if (!/^https?:\/\//i.test(url)) throw new Error('web_read requires an http(s) URL');
         const maxChars = typeof args.max_chars === 'number' ? Math.max(500, Math.min(50_000, Math.floor(args.max_chars))) : 8000;
         return readPage(url, maxChars);
+      },
+    },
+    {
+      name: 'youtube_transcript',
+      system: 'integration',
+      description:
+        'Get the (auto) subtitle transcript of a YouTube video as text. Provide a video URL. Uses yt-dlp; run `jarv-genie --doctor` to check the YouTube channel.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'A YouTube video URL, e.g. https://youtube.com/watch?v=...' },
+          lang: { type: 'string', description: 'Subtitle language code (default "en").' },
+        },
+        required: ['url'],
+      },
+      handler: async (args) => {
+        const url = String(args.url ?? '').trim();
+        if (!url) throw new Error('youtube_transcript requires a url');
+        return youtubeTranscript(url, String(args.lang ?? 'en'));
+      },
+    },
+    {
+      name: 'read_rss',
+      system: 'integration',
+      description:
+        'Read an RSS or Atom feed and return its recent entries (title, link, summary). Provide a feed URL. Uses feedparser (Python).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'The RSS/Atom feed URL.' },
+          limit: { type: 'number', description: 'Max entries to return (default 20).' },
+        },
+        required: ['url'],
+      },
+      handler: async (args) => {
+        const url = String(args.url ?? '').trim();
+        if (!url) throw new Error('read_rss requires a url');
+        const limit = typeof args.limit === 'number' ? Math.max(1, Math.min(50, Math.floor(args.limit))) : 20;
+        return readRss(url, limit);
+      },
+    },
+    {
+      name: 'github_search',
+      system: 'integration',
+      description:
+        'Search GitHub repositories by query (via the gh CLI). Returns repo name, url, description, stars. Requires `gh auth login`.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'The GitHub search query.' },
+          limit: { type: 'number', description: 'Max results (default 10).' },
+        },
+        required: ['query'],
+      },
+      handler: async (args) => {
+        const query = String(args.query ?? '').trim();
+        if (!query) throw new Error('github_search requires a query');
+        const limit = typeof args.limit === 'number' ? Math.max(1, Math.min(50, Math.floor(args.limit))) : 10;
+        return githubSearch(query, limit);
+      },
+    },
+    {
+      name: 'github_read',
+      system: 'integration',
+      description:
+        'Get metadata (description, language, stars, url) for a GitHub repository by "owner/name". Uses the gh CLI.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          repo: { type: 'string', description: 'Repository as "owner/name", e.g. "Panniantong/Agent-Reach".' },
+        },
+        required: ['repo'],
+      },
+      handler: async (args) => {
+        const repo = String(args.repo ?? '').trim();
+        if (!repo) throw new Error('github_read requires a repo like "owner/name"');
+        return githubRepoInfo(repo);
       },
     },
   ];
