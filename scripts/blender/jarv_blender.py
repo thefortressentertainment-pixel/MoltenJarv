@@ -1,7 +1,7 @@
 # Jarv Genie ⇄ Blender Bridge
 #
 # Prompt Jarv Genie directly from inside Blender — one node, no chain of daemons.
-# This add-on POSTs a prompt to the running Jarv hub (`POST /api/chat`) and shows
+# This add-on POSTs a prompt to the running Jarv hub (`POST /api/blender`) and shows
 # the reply in a panel. The hub is the single always-on Node process bound to
 # http://127.0.0.1:3001 (optionally --host 0.0.0.0); this add-on talks to it the
 # same way the web UI does.
@@ -47,8 +47,8 @@ def _read_token():
 
 
 def _ask_jarv(hub, token, message, timeout=180):
-    """POST a prompt to the hub's /api/chat (non-stream) and return the reply text."""
-    url = (hub or DEFAULT_HUB).rstrip("/") + "/api/chat"
+    """POST a prompt to the hub's /api/blender (non-stream) and return the reply text."""
+    url = (hub or DEFAULT_HUB).rstrip("/") + "/api/blender"
     payload = json.dumps({"message": message}).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     if token:
@@ -56,7 +56,7 @@ def _ask_jarv(hub, token, message, timeout=180):
     req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         body = json.loads(resp.read().decode("utf-8"))
-    # /api/chat (non-stream) returns TaskResult: { text, steps, toolCalls, provider, model }
+    # /api/blender (non-stream) returns TaskResult: { text, steps, toolCalls, provider, model }
     text = body.get("text") or ""
     if isinstance(body.get("error"), str):
         return "[error] " + body["error"]
@@ -127,7 +127,7 @@ class JarvAddonPreferences(bpy.types.AddonPreferences):
 
     hub_url: bpy.props.StringProperty(
         name="Hub URL",
-        description="Base URL of the Jarv hub (/api/chat is appended)",
+        description="Base URL of the Jarv hub (/api/blender is appended)",
         default=DEFAULT_HUB,
     )
     token: bpy.props.StringProperty(

@@ -237,6 +237,23 @@ function handler(ctx: AgentContext, opts: UiServerOptions, host: string) {
           return json(res, 502, { error: err instanceof Error ? err.message : String(err) });
         }
       }
+
+      // Dedicated, RAM-light Blender handler (the Blender add-on uses this, not
+      // /api/chat). It isolates Blender work to a tiny toolset + the small local
+      // model, so prompting from inside Blender does NOT spin up the heavy
+      // 84-tool + memory + RAG + judge machinery (which saturated RAM → wheel).
+      if (req.method === 'POST' && route === '/api/blender') {
+        const body = await readJson(req);
+        const message = String(body.message ?? '').trim();
+        if (!message) return json(res, 400, { error: 'message is required' });
+        try {
+          const { runBlenderTask } = await import('../blender/runner.js');
+          const result = await runBlenderTask(ctx.config, { message, model: body.model ? String(body.model) : undefined });
+          return json(res, 200, result);
+        } catch (err) {
+          return json(res, 502, { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
       if (req.method === 'POST' && route === '/api/new') {
         await ctx.memory.sessionReset(SESSION);
         return json(res, 200, { ok: true });
