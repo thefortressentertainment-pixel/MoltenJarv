@@ -11,6 +11,7 @@ import {
   type AcquiredLease,
 } from '../resource.js';
 import { TelegramClient, type TgUpdate } from '../telegram/client.js';
+import { transcribeTelegramAudio, audioFileId } from '../telegram/voice.js';
 import {
   isTrustedDevice,
   verifyPairingCode,
@@ -388,6 +389,21 @@ export async function runTelegram(ctx: AgentContext): Promise<void> {
       return `⚠️ I couldn't download the attached image (${err instanceof Error ? err.message : String(err)}). Try sending it again.`;
     });
     if (imgPrompt) caption = imgPrompt;
+
+    // Voice / audio → text via STT. Transcribe the note and treat the transcript
+    // as the message so Jarv parses the instruction and acts on it with its skills.
+    const fileId = u.message ? audioFileId(u.message) : null;
+    if (fileId) {
+      try {
+        const v = await transcribeTelegramAudio(client, fileId.fileId, fileId.ext);
+        process.stdout.write(`[jarv-genie] voice -> "${v.text.slice(0, 120)}"\n`);
+        // Prefer the transcript as the instruction; keep any text caption if present.
+        caption = caption ? `${caption}\n${v.text}` : v.text;
+      } catch (err) {
+        process.stdout.write(`[jarv-genie] voice transcription error: ${err instanceof Error ? err.message : String(err)}\n`);
+        caption = caption || `⚠️ I couldn't transcribe that voice note (${err instanceof Error ? err.message : String(err)}). Try sending text, or check STT setup (whisper-cli + model, or OPENAI_API_KEY).`;
+      }
+    }
 
     if (!caption) return;
 

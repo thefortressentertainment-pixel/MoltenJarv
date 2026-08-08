@@ -66,3 +66,17 @@ all principles/boundaries/operating rules:
 
 Not theatrical, no parody, and the joke never outranks substance. The soul is a
 live file under `~/.jarv-genie/soul/` (outside the repo, like skills/trust state).
+
+## Voice input via Telegram (2026-08-08)
+
+The bridge now accepts voice/audio messages: it downloads a Telegram `voice`
+(OPUS) or `audio` note, converts it to 16 kHz mono WAV (ffmpeg, afconvert/sox
+fallbacks), and runs it through Jarv's existing STT (`transcribe()`: local
+whisper.cpp first, OpenAI whisper-1 fallback). The transcript is then handled
+exactly like a typed message, so "Open YouTube and play X video" is parsed and
+acted on through Jarv's normal tools/skills.
+
+- `src/telegram/voice.ts` — download + convert + transcribe.
+- `src/cli/telegram.ts` — `onUpdate` detects audio and feeds the transcript in.
+- Requires `whisper-cli` + a model (or `OPENAI_API_KEY`) for STT; ffmpeg for
+  conversion (all present on this Mac).

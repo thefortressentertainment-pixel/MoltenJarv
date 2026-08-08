@@ -11,6 +11,8 @@ export interface TgUpdate {
     chat: { id: number | string };
     text?: string;
     caption?: string;
+    voice?: { file_id: string; duration: number; mime_type?: string; file_size?: number };
+    audio?: { file_id: string; duration: number; mime_type?: string; file_size?: number; title?: string };
     reply_to_message?: {
       message_id: number;
       text?: string;
