@@ -15,6 +15,7 @@ import type { Capability } from '../capability.js';
 import { compactWorkingContext } from './compaction.js';
 import { buildRoots, renderRootsBoundary } from '../roots.js';
 import { executorDecision } from '../telegram/trust.js';
+import { pinTools } from '../tools/pinning.js';
 
 /**
  * Iterative plan→execute loop task runner. Unlike the conversational Agent,
@@ -71,14 +72,21 @@ export class TaskRunner {
   /**
    * Expose tools to the model. Memory tools (remember/recall/list_facts) are
    * hidden unless the user's message is actually about memory — the model
-   * otherwise invents memories and calls them on every task.
+   * otherwise invents memories and calls them on every task. When BM25
+   * tool-pinning is configured (agent.toolPinning.maxTools), the toolset is
+   * further pinned to the top-K relevant tools for the task (plus safety/core
+   * tools) so a small local model isn't overwhelmed by ~90 schemas.
    */
   private usableTools(input: string): ToolDefinition[] {
-    const base = this.opts.capability ? this.opts.tools.listForCapability(this.opts.capability) : this.opts.tools.list();
-    if (/\b(remember|recall|memor(y|ies)|facts|what do you (know|remember)|do you remember)\b/i.test(input)) {
-      return base;
+    let base = this.opts.capability ? this.opts.tools.listForCapability(this.opts.capability) : this.opts.tools.list();
+    if (!/\b(remember|recall|memor(y|ies)|facts|what do you (know|remember)|do you remember)\b/i.test(input)) {
+      base = base.filter((t) => !['remember', 'recall', 'list_facts'].includes(t.name));
     }
-    return base.filter((t) => !['remember', 'recall', 'list_facts'].includes(t.name));
+    const pinning = this.opts.config?.agent?.toolPinning;
+    if (pinning && pinning.maxTools > 0 && base.length > pinning.maxTools) {
+      base = pinTools(input, base, { maxTools: pinning.maxTools });
+    }
+    return base;
   }
 
   /** The CODE_PLAYBOOK (~2.4KB of repo-coding rules) only earns its place when

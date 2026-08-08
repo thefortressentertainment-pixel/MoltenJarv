@@ -53,3 +53,33 @@ export function isRiskExec(def: ToolDefinition): boolean {
 export function isRiskExternal(def: ToolDefinition): boolean {
   return toolRisk(def) === 'external';
 }
+
+/**
+ * Read-vs-write policy split (ha-mcp pattern, MIT). A two-way classification
+ * that drives *approval posture*, complementing the 4-class risk model:
+ *
+ *   `read`  — harmless, non-mutating; auto-approve, never gated. (risk 'read'.)
+ *   `mutating` — write-local / exec / external; must pass the consent gate
+ *                (auto-approve only when a human is present, fail-closed for
+ *                external/fail-closed tools).
+ *
+ * The ha-mcp doctrine is: auto-approve reads, prompt writes. This lifts that
+ * one decision to a single, data-driven helper so no tool schema needs a
+ * bespoke check.
+ *
+ * Defense-in-depth: a tool on the READ_ONLY_TOOLS name table (an authoritative
+ * list of non-mutating tools) is always `read` — even if someone mis-flags it
+ * `consequential`. Pinning's safety floor and the consent gate both trust this
+ * so an accidental harmful flag can't gate a genuinely read-only tool.
+ */
+export type ToolPolicy = 'read' | 'mutating';
+
+export function policyFor(def: ToolDefinition): ToolPolicy {
+  if (READ_ONLY_TOOLS.has(def.name)) return 'read';
+  return toolRisk(def) === 'read' ? 'read' : 'mutating';
+}
+
+/** True when a tool's declared risk says it is harmful (not a pure read). */
+export function isMutating(def: ToolDefinition): boolean {
+  return policyFor(def) === 'mutating';
+}

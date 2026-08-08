@@ -128,7 +128,14 @@ installed; heavy for 8 GB). Two patterns worth porting to Jarv **independent of
 HA**: (a) **search-based tool discovery / BM25 tool-pinning** so a *small local
 model* isn't overwhelmed by ~91 schemas; (b) **read-vs-write tool policy split**
 (auto-approve reads, prompt writes). These two help Jarv on T1 immediately even
-without installing HA.
+without installing HA. — ✅ BOTH PATTERNS PORTED:
+- BM25 tool-pinning → `src/tools/pinning.ts` (`bm25ScoreTools`, `pinTools` with
+  always-keep `CORE_TOOLS`), wired into `TaskRunner.usableTools()` gated by
+  config `agent.toolPinning.maxTools` (opt-in; off by default). 6 tests.
+- Read/write policy split → `src/risk.ts` `policyFor`/`isMutating`
+  (read = auto-approve, mutating = consent-gated), with defense-in-depth: a
+  READ_ONLY_TOOLS tool is never classed mutating even if mis-flagged
+  consequential. 2 tests. Full suite 342 passing, typecheck + build clean.
 
 ### P3. Ambient/hearing + life-memory companion — `screenpipe` (T2/T3, doc only)
 See §B3. Not built now (privacy + 8 GB). Its event-driven capture + diarization +
@@ -181,7 +188,10 @@ runtime. T2: needs the extra RAM/cores.
 2. P1 computer-use localization ✅ `src/computer/locate.ts` + `ui_click_at` +
    `screen_capture` dimensions — the "see → click" coordinate round-trip and a
    real screen-pixel click path. 334 tests passing, typecheck + build clean.
-   → next: P2 portable patterns (BM25 tool-pinning + read/write policy split).
+3. P2 portable patterns ✅ BM25 tool-pinning (`src/tools/pinning.ts`, wired into
+   `TaskRunner` behind `agent.toolPinning.maxTools`) + read/write policy split
+   (`src/risk.ts` `policyFor`). 342 tests passing.
+   → next (Phase 2): P6 self-learning skill caching.
 2. P1 computer-use localization (+ batching + pruning + trajectories for the
    `judge`) — makes existing GUI/UI tools trustworthy.
 3. P2's **two portable patterns** (BM25 tool-pinning + read/write policy split).

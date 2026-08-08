@@ -57,6 +57,11 @@ export interface JarvGenieConfig {
     skillsPath?: string;
     /** Additional read-only roots the agent may read from (see src/roots.ts). */
     extraReadRoots?: string[];
+    /** BM25 tool-pinning. When `maxTools` is set (e.g. 24), the toolset exposed
+     *  to the model each run is pinned to the top-K relevant tools for the task
+     *  (plus safety/core tools) — cuts tool-schema bloat for small local models.
+     *  When unset, all tools are always exposed (current behavior). */
+    toolPinning?: { maxTools: number };
   };
   memory: {
     dir: string;
