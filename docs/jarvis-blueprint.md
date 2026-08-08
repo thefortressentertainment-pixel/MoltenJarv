@@ -62,7 +62,7 @@ From `src/voice/index.ts` + `src/voice/wake.ts`:
 - TTS: Piper (neural, `~/.jarv-genie/piper-venv`) or macOS `say`; barge-in.
 - Wake word: transcript keyword match (`--wake`) — fully local.
 
-### B2. Recommended design — a Jarv-native "always-ready listen" loop (T1, opt-in)
+### B2. Recommended design — a Jarv-native "always-ready listen" loop (T1, opt-in) — ✅ landed
 Because it is **off by default**, it imposes no constraints now; owners who want
 freer talk enable it. Lightweight, event-driven, no new heavy runtime:
 
@@ -80,6 +80,9 @@ freer talk enable it. Lightweight, event-driven, no new heavy runtime:
    transcribed utterance is written into a new `voice-log` memory that feeds
    `recall()`, so Jarv can recollect what you told it out loud (the
    "life memory" seed, §C4). Diarization deferred to T2 (`screenpipe` style).
+   → `jarv-genie listen` (`src/cli/listen.ts`) runs the wake-word loop and persists
+   each spoken instruction as a durable `source:'voice'` fact; `--once` for
+   automation. 3 tests.
 4. **Barge-in + transcript hand-back** — reuse the streaming partials so Jarv can
    acknowledge ("yes?") the instant the wake phrase triggers, then listen for
    the full request (extend the existing recording window).
@@ -204,7 +207,9 @@ runtime. T2: needs the extra RAM/cores.
    (`src/risk.ts` `policyFor`). 342 tests passing.
 4. P5 personal-knowledge RAG ✅ `src/rag.ts` + `rag_index/rag_query/rag_status`
    (local Ollama-embedding index over the user's own files). 358 tests passing.
-5. B2 **`jarv-genie listen`** — the optional constraint-free voice loop (opt-in). [pending]
+5. B2 **`jarv-genie listen`** ✅ `src/cli/listen.ts` — wake-word constraint-free
+   voice loop that persists each spoken instruction as a durable `voice` fact
+   (`--once` for automation). 361 tests passing.
 
 **Phase 2 — T1/T2**
 6. P6 self-learning skill caching ✅ `src/learn.ts` + `learn_skill` tool — verified

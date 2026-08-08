@@ -18,6 +18,7 @@ import { runTelegram } from './cli/telegram.js';
 import { runPerms } from './cli/perms.js';
 import { addMonitor, printMonitors, removeMonitor, runMonitorDaemon } from './cli/monitor.js';
 import { runVoiceSession, runWakeSession, type VoiceSessionOptions } from './cli/voice.js';
+import { runListenCommand } from './cli/listen.js';
 import { phoneCommand } from './cli/phone.js';
 import { installPiper } from './voice/index.js';
 import { ensureConfigFile } from './config/index.js';
@@ -73,6 +74,7 @@ Usage:
   jarv-genie voice --live   show live captions as you speak (streaming STT)
   jarv-genie voice --wake   hands-free: answers when you say "hey jarv" (wake word)
   jarv-genie voice --setup-piper   install neural TTS (Piper) for faster replies
+  jarv-genie listen [--once] [--wake|--no-wake] [--no-store]   always-ready voice: wake-word hearing + spoken instructions remembered
   jarv-genie agent [schedule|list|run|once|remove]     scheduled briefings & reminders
   jarv-genie dream [--force] [--min-count N]   consolidate long-term memory now
   jarv-genie extract "<conversation>"          auto-extract durable facts into memory
@@ -190,6 +192,18 @@ function parseVoiceArgs(argv: string[]): { opts: VoiceSessionOptions; remoteUrl:
     }
   }
   return { opts, remoteUrl: extractRemote(argv) };
+}
+
+/** Extract `--wake-phrase "<p>"` values (repeatable) from a raw arg list. */
+function extractWakePhrases(argv: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--wake-phrase') {
+      const p = argv[++i];
+      if (p) out.push(p);
+    }
+  }
+  return out;
 }
 
 function resolveRemote(urlOrEmpty: string): RemoteClient {
@@ -363,6 +377,19 @@ async function main(): Promise<void> {
       remoteUrl !== undefined ? remoteBackend(resolveRemote(remoteUrl)) : localBackend(await buildAgent());
     const session = opts.wake ? runWakeSession : runVoiceSession;
     await session(backend, opts);
+    return;
+  }
+
+  if (raw[0] === 'listen') {
+    const rest = raw.slice(1);
+    const ctx = await buildAgent();
+    await runListenCommand(ctx, {
+      wake: !rest.includes('--no-wake'),
+      once: rest.includes('--once'),
+      store: !rest.includes('--no-store'),
+      tts: !rest.includes('--no-tts'),
+      ...(extractWakePhrases(rest).length ? { wakePhrases: extractWakePhrases(rest) } : {}),
+    });
     return;
   }
 
