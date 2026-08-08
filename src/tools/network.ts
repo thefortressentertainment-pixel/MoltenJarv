@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { activeBackend, internetChannels, type Channel } from '../web/channels.js';
+import { resolveSecret, redactSecrets } from '../credentials.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -31,6 +32,17 @@ async function readyChannel(channelId: string): Promise<{ channel: Channel; back
 async function run(cmd: string, args: string[], timeoutMs = 60_000): Promise<string> {
   const { stdout } = await execFileAsync(cmd, args, { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 });
   return stdout;
+}
+
+/** Run a command with extra env secrets; throws are surfaced so callers redact. */
+async function runWithEnv(cmd: string, args: string[], env: Record<string, string>, timeoutMs = 60_000): Promise<string> {
+  const { stdout } = await execFileAsync(cmd, args, { env: { ...process.env, ...env }, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 });
+  return stdout;
+}
+
+/** A GH token from the secret store (never argv); undefined when the system gh auth is used. */
+function githubToken(): string | undefined {
+  return resolveSecret('GH_TOKEN', ['GITHUB_TOKEN']);
 }
 
 /** Fetch a YouTube transcript via yt-dlp (auto subtitles, returns SRT text). */
@@ -86,11 +98,15 @@ print(json.dumps(out))`;
 export async function githubRepoInfo(repo: string): Promise<RouteResult<string>> {
   const ready = await readyChannel('github');
   if (!ready) return { ok: false, hint: 'gh CLI not configured — install and run: gh auth login' };
+  const token = githubToken();
   try {
-    const out = await run('gh', ['repo', 'view', repo, '--json', 'description,primaryLanguage,stargazerCount,url', '-q', '.']);
-    return { ok: true, route: ready.backend, data: out };
+    const out = token
+      ? await runWithEnv('gh', ['repo', 'view', repo, '--json', 'description,primaryLanguage,stargazerCount,url', '-q', '.'], { GH_TOKEN: token })
+      : await run('gh', ['repo', 'view', repo, '--json', 'description,primaryLanguage,stargazerCount,url', '-q', '.']);
+    return { ok: true, route: ready.backend, data: redactSecrets(out, token) };
   } catch (err) {
-    return { ok: false, route: ready.backend, error: err instanceof Error ? err.message : String(err), hint: `gh could not read "${repo}" — does it exist / are you authenticated?` };
+    const message = redactSecrets(err instanceof Error ? err.message : String(err), token);
+    return { ok: false, route: ready.backend, error: message, hint: `gh could not read "${repo}" — does it exist / are you authenticated?` };
   }
 }
 
@@ -98,10 +114,15 @@ export async function githubRepoInfo(repo: string): Promise<RouteResult<string>>
 export async function githubSearch(query: string, limit = 10): Promise<RouteResult<string>> {
   const ready = await readyChannel('github');
   if (!ready) return { ok: false, hint: 'gh CLI not configured — install and run: gh auth login' };
+  const token = githubToken();
   try {
-    const out = await run('gh', ['search', 'repos', query, '--limit', String(Math.max(1, Math.min(50, limit))), '--json', 'name,url,description,stargazersCount', '-q', '.']);
-    return { ok: true, route: ready.backend, data: out };
+    const args = ['search', 'repos', query, '--limit', String(Math.max(1, Math.min(50, limit))), '--json', 'name,url,description,stargazersCount', '-q', '.'];
+    const out = token
+      ? await runWithEnv('gh', args, { GH_TOKEN: token })
+      : await run('gh', args);
+    return { ok: true, route: ready.backend, data: redactSecrets(out, token) };
   } catch (err) {
-    return { ok: false, route: ready.backend, error: err instanceof Error ? err.message : String(err), hint: 'gh search failed.' };
+    const message = redactSecrets(err instanceof Error ? err.message : String(err), token);
+    return { ok: false, route: ready.backend, error: message, hint: 'gh search failed.' };
   }
 }

@@ -68,11 +68,11 @@ account for cookie-based platforms.
 
 ## Proposed sequencing
 
-1. **A2 doctor for internet channels** — pure, testable, zero-risk; gives the
-   `channels/` active-backend table Jarv can trust.
-2. **A1 tools** — `youtube_transcript`, `read_rss`, `github_search/read`,
-   `internet_read` funnel (each routed via `run_shell`/fetch, backend list in code).
-3. **A3 credential passthrough** — wire any platform creds through the secret store.
+1. **A2 doctor for internet channels** — **[done]** pure channel table + doctor.
+2. **A1 tools** — **[done]** `youtube_transcript`, `read_rss`, `github_search/read`.
+3. **A3 credential passthrough** — **[done]** secret-store creds, redaction, guardrails.
+
+All three Agent-Reach items are implemented and green (294 tests).
 
 Each lands with tests (`npm test`, currently 281) + `self_review`, behind the
 consent gate. Nothing is implemented yet; working tree clean at `503f96f`.
@@ -85,6 +85,8 @@ consent gate. Nothing is implemented yet; working tree clean at `503f96f`.
   `youtube_transcript` (yt-dlp), `read_rss` (feedparser), `github_search`/`github_read`
   (gh CLI). Each routes through `activeBackend()` and returns a clean "backend not
   configured" hint when the route is down. Verified live via `gh` on this Mac.
-  289 tests passing.
-- **A3 (credential passthrough)** — remaining: wire any platform creds through the
-  secret store (never the prompt), read-only defaults.
+- **A3 done** `src/credentials.ts` — platform creds read from the secret store
+  (never the prompt), `redactSecrets()` masks any leak in errors/result before it
+  reaches the model, `gh` channel accepts a store-managed `GH_TOKEN`, and the
+  doctor render carries the throwaway-account + "creds only in the store" hygiene
+  notes. 294 tests passing.

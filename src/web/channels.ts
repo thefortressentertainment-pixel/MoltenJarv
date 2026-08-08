@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { getSecretStore } from '../config/secrets.js';
 
 /**
  * Internet-channel routing + doctor, adapted from the *multi-backend routing*
@@ -101,11 +102,12 @@ export function internetChannels(): Channel[] {
         {
           id: 'gh',
           label: 'GitHub CLI (gh)',
-          probe: async () => (await commandExists('gh')) && (await ghAuthenticated()),
-          setupHint: 'Install gh CLI and run `gh auth login`.',
+          probe: async () =>
+            (await commandExists('gh')) && ((await ghAuthenticated()) || Boolean(secretTokenFor('github'))),
+          setupHint: 'Install gh CLI and run `gh auth login`, or store a token: jarv-genie key set GH_TOKEN <token>',
         },
       ],
-      brokenHint: 'gh CLI missing or not authenticated.',
+      brokenHint: 'gh CLI missing, or not authenticated and no GH_TOKEN in the secret store.',
     },
     {
       id: 'youtube',
@@ -158,6 +160,15 @@ async function ghAuthenticated(): Promise<boolean> {
   }
 }
 
+/** A platform token from the secret store (never the prompt), if the user set one. */
+function secretTokenFor(platform: 'github'): string | undefined {
+  if (platform === 'github') {
+    const store = getSecretStore();
+    return store.get('GH_TOKEN') ?? store.get('GITHUB_TOKEN');
+  }
+  return undefined;
+}
+
 async function pythonModule(mod: string): Promise<boolean> {
   try {
     await execFileAsync('python3', ['-c', `import ${mod}`], { timeout: 8000 });
@@ -197,13 +208,15 @@ export async function internetChannelsDoctor(channels: Channel[] = internetChann
 
 /** Render the doctor report for the terminal (matches existing `[...]` style). */
 export function renderInternetDoctor(statuses: ChannelStatus[]): string {
-  return statuses
-    .map((s) =>
-      s.ok
-        ? `[OK] ${s.label} — via ${s.activeBackend}`
-        : `[FAIL] ${s.label} — ${s.hint}`,
-    )
-    .join('\n');
+  const lines = statuses.map((s) =>
+    s.ok
+      ? `[OK] ${s.label} — via ${s.activeBackend}`
+      : `[FAIL] ${s.label} — ${s.hint}`,
+  );
+  lines.push('');
+  lines.push('Security: tokens/cookies live only in the secret store (never the prompt).');
+  lines.push('For cookie-login platforms (Twitter/X, Reddit, etc.) use a dedicated throwaway account, not your main one.');
+  return lines.join('\n');
 }
 
 // Only the injectable probe helpers are exported for tests; runtime tools built on
