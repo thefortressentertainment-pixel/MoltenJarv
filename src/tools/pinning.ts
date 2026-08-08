@@ -87,7 +87,7 @@ export function tokenize(text: string): string[] {
  * agent always needs to be able to check its own health, judge its work, and
  * see status even when the task mentions none of them explicitly.
  */
-export const CORE_TOOLS = ['self_review', 'judge', 'system_status', 'verify_change'];
+export const CORE_TOOLS = ['self_review', 'judge', 'system_status', 'verify_change', 'refine_code'];
 
 /**
  * Pin the toolset to the top-K relevant tools for `input` (BM25), always

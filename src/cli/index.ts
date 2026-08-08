@@ -40,6 +40,7 @@ import { judgeTools } from '../tools/judge.js';
 import { learnTools } from '../tools/learn.js';
 import { ragTools } from '../tools/rag.js';
 import { verifyTools } from '../tools/verify.js';
+import { refineTools } from '../tools/refine.js';
 import { dataHome } from '../config/defaults.js';
 import path from 'node:path';
 
@@ -60,7 +61,8 @@ export async function buildAgent(): Promise<AgentContext> {
   const memory = buildMemory(config);
 
   const registry = new ToolRegistry();
-  registry.registerMany([...timeTools(), ...fileTools(), ...memoryTools(), ...webTools(), ...speechTools(), ...computerTools(), ...emailTools(), ...reminderTools(), ...schedulerTools(), ...systemTools(), ...uiTools(), ...drawTools(), ...telegramTools(), ...statusTools(), ...cameraTools(), ...calendarTools(), ...briefingTools(), ...selfReviewTools(path.join(config.memory.dir, 'reviews.json')), ...shutdownTools(), ...codeTools(), ...appsTools(), ...initiativeTools(), ...deliveryLogTools(), ...visionTools(), ...useToolTools(), ...selfWakeTools(dataHome()), ...judgeTools(path.join(config.memory.dir, 'reviews.json')), ...learnTools(config.agent.skillsPath), ...ragTools(path.join(dataHome(), 'rag')), ...verifyTools()]);
+  let router: ModelRouter;
+  registry.registerMany([...timeTools(), ...fileTools(), ...memoryTools(), ...webTools(), ...speechTools(), ...computerTools(), ...emailTools(), ...reminderTools(), ...schedulerTools(), ...systemTools(), ...uiTools(), ...drawTools(), ...telegramTools(), ...statusTools(), ...cameraTools(), ...calendarTools(), ...briefingTools(), ...selfReviewTools(path.join(config.memory.dir, 'reviews.json')), ...shutdownTools(), ...codeTools(), ...appsTools(), ...initiativeTools(), ...deliveryLogTools(), ...visionTools(), ...useToolTools(), ...selfWakeTools(dataHome()), ...judgeTools(path.join(config.memory.dir, 'reviews.json')), ...learnTools(config.agent.skillsPath), ...ragTools(path.join(dataHome(), 'rag')), ...verifyTools(), ...refineTools(() => router)]);
 
   const { tools: externalTools, errors: externalErrors } = await loadExternalMcpTools(config.mcp.servers);
   registry.registerMany(externalTools);
@@ -72,7 +74,7 @@ export async function buildAgent(): Promise<AgentContext> {
     for (const issue of toolset) externalErrors.push(issue);
   }
 
-  const router = new ModelRouter(config);
+  router = new ModelRouter(config);
   const agent = new Agent({ router, tools: registry, memory, config });
 
   return { agent, router, memory, config, tools: registry, externalErrors };
