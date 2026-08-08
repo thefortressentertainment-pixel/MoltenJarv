@@ -156,9 +156,13 @@ conversations/task runs and stores them as small retrievable memories.
   4 new (`test/extract.test.ts`).
 - Adopt the **temporal/provenance schema from `getzep/graphiti` as a concept**:
   facts carry validity windows + episode provenance, and *stale facts are
-  invalidated, not blindly overwritten* — implement in the existing JSON store,
-  not a graph DB (avoids Neo4j). (Validity windows deferred to a follow-up; the
-  `extraction` source tag is the provenance seed.)
+  invalidated, not blindly overwritten* — implemented in the existing JSON store,
+  NOT a graph DB (avoids Neo4j). ✅ **Landed** — see
+  `docs/graphiti-harvest-plan.md`: `MemoryFact` gains `validFrom/validTo/
+  provenance/subject/relationship/object`; `FactStore.update` supersedes (retains
+  history) instead of overwriting; `validFacts()/historicalFacts()/factsForSubject()`
+  + `memory_history` tool + `extractTriplet` stamp triplets/provenance on every
+  extracted fact. Backward-compatible (existing 17-fact store loads untouched).
 
 ### P5. Personal knowledge ingestion / RAG — LlamaIndex pattern (T1) — ✅ landed
 MIT. Jarv reads files on demand but has no **queryable index over one's own

@@ -2,6 +2,7 @@ import type { ModelRouter } from '../providers/index.js';
 import type { Memory } from './index.js';
 import type { MemoryFact } from './types.js';
 import { parseJsonArray } from './dream.js';
+import { extractTriplet, TRIPLET_SYSTEM, tripletPrompt } from './triplet.js';
 
 /**
  * "Extraction" — automatic durable-fact discovery (JARVIS blueprint §C4, ported
@@ -129,6 +130,7 @@ export async function extractFacts(
   const added: string[] = [];
   const skipped: string[] = [];
   const seen = new Set<string>();
+  const provenance = truncated.length > 600 ? truncated.slice(0, 600) + '…' : truncated;
   for (const candidate of candidates) {
     const c = norm(candidate);
     if (!c || seen.has(c)) continue;
@@ -137,7 +139,24 @@ export async function extractFacts(
       skipped.push(candidate);
       continue;
     }
-    await memory.addFact(candidate, 'extraction');
+    // GRAPH: attach an entity triplet + provenance to each extracted durable fact
+    // so it is subject-scoped/traversable, not just a flat string.
+    const { triplet } = await extractTriplet(candidate, async (fact) => {
+      const chat = await router.chat({
+        messages: [
+          { role: 'system', content: TRIPLET_SYSTEM },
+          { role: 'user', content: tripletPrompt(fact) },
+        ],
+      });
+      return chat.content ?? '';
+    });
+    await memory.addFactMeta(candidate, {
+      source: 'extraction',
+      provenance,
+      subject: triplet?.subject,
+      relationship: triplet?.relationship,
+      object: triplet?.object,
+    });
     added.push(candidate);
     // Dedup against what we just added in this batch too.
     existing.push({ id: '', text: candidate, source: 'extraction', createdAt: '', updatedAt: '' });

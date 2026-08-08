@@ -94,19 +94,22 @@ test('FactStore.recordAccess increments counters and persists', async () => {
   }
 });
 
-test("FactStore.update replaces text in place (update-don't-duplicate)", async () => {
+test('FactStore.update supersedes in place (GRAPH temporal): old retained as history, new created', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'jarv-upd-'));
   try {
     const store = new FactStore(path.join(dir, 'facts.json'));
     const a = await store.add('user likes dark mode');
-    const before = (await store.list()).length;
 
     const updated = await store.update(a.id, 'user prefers light mode');
-    assert.ok(updated, 'update returns the fact');
+    assert.ok(updated, 'update returns a fact');
     assert.strictEqual(updated!.text, 'user prefers light mode');
-    // The fact count is unchanged — we corrected, not duplicated.
-    assert.strictEqual((await store.list()).length, before);
-    assert.strictEqual((await store.get(a.id))?.text, 'user prefers light mode');
+    // Supersede (not text-overwrite): the old fact is retained with validTo set
+    // for history, and a NEW currently-valid fact is created.
+    const old = await store.get(a.id);
+    assert.strictEqual(old?.text, 'user likes dark mode', 'old text preserved, not overwritten');
+    assert.ok(old?.validTo, 'superseded fact keeps its validity end');
+    assert.strictEqual((await store.validFacts()).some((f) => f.id === updated!.id), true, 'new fact currently valid');
+    assert.strictEqual((await store.historicalFacts()).some((f) => f.id === a.id), true, 'old fact historical');
 
     // Unknown id → undefined.
     assert.strictEqual(await store.update('missing', 'x'), undefined);

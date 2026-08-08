@@ -24,10 +24,17 @@ export class Memory implements MemoryService {
     return { id: fact.id };
   }
 
-  /** Update-don't-duplicate: replace a fact's text by id. Returns the new id, or
-   *  null when the id is unknown. */
-  async updateFact(id: string, text: string): Promise<{ id: string } | null> {
-    const fact = await this.store.update(id, text);
+  /** Add a fact with GRAPH metadata (temporal validity, provenance, triplet). */
+  async addFactMeta(text: string, meta: { source?: string; provenance?: string; subject?: string; relationship?: string; object?: string } = {}): Promise<{ id: string }> {
+    const fact = await this.store.add(text, meta);
+    return { id: fact.id };
+  }
+
+  /** Update-don't-delete (temporal supersede): the old fact is retained as
+   *  historical (validTo set) and a new currently-valid fact is created. Returns
+   *  the new fact's id, or null when the id is unknown. */
+  async updateFact(id: string, text: string, meta: { source?: string; provenance?: string; subject?: string; relationship?: string; object?: string } = {}): Promise<{ id: string } | null> {
+    const fact = await this.store.update(id, text, meta);
     return fact ? { id: fact.id } : null;
   }
 

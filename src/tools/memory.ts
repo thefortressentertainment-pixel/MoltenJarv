@@ -64,7 +64,7 @@ export function memoryTools(): ToolDefinition[] {
       name: 'memory_update',
       system: 'memory',
       description:
-        "Correct a remembered fact in place (update-don't-duplicate) by its id, so a wrong or stale fact is replaced rather than piling up next to a duplicate. Use when the user corrects a detail they previously told you. Returns the updated fact id.",
+        "Correct a remembered fact by its id. GRAPH-style temporal update: the old fact is retained as HISTORY (its validity window is closed), and a new currently-valid fact is created with the corrected text — so nothing is lost and recall reflects the latest truth while the past stays queryable. Use when the user corrects a detail they previously told you. Returns the new fact id.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -80,6 +80,31 @@ export function memoryTools(): ToolDefinition[] {
         const result = await ctx.memory.updateFact(id, text);
         if (!result) throw new Error(`no fact with id "${id}" — run list_facts to see ids`);
         return result;
+      },
+    },
+    {
+      name: 'memory_history',
+      system: 'memory',
+      description:
+        'Compare what is currently TRUE about a subject vs what used to be true (GRAPH temporal memory). Optionally pass a subject (e.g. "user") to see that entity\'s facts and their validity windows. Use when something may have changed over time — what the user prefers NOW vs before, or a fact that was superseded.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          subject: { type: 'string', description: 'Optional entity (subject or object) to scope to, e.g. "user" or "coffee".' },
+        },
+      },
+      handler: async (args, ctx) => {
+        const subject = args.subject ? String(args.subject).trim().toLowerCase() : undefined;
+        const store = (ctx.memory as unknown as { factStore: import('../memory/store.js').FactStore }).factStore;
+        if (!store) throw new Error('memory store unavailable');
+        const current = subject ? (await store.factsForSubject(subject)).filter((f) => !f.validTo || Date.parse(f.validTo) > Date.now()) : await store.validFacts();
+        const history = subject ? (await store.factsForSubject(subject)).filter((f) => f.validTo && Date.parse(f.validTo) <= Date.now()) : await store.historicalFacts();
+        return {
+          subject,
+          current: current.map((f) => ({ id: f.id, text: f.text, from: f.validFrom, relationship: f.relationship, object: f.object })),
+          history: history.map((f) => ({ id: f.id, text: f.text, from: f.validFrom, until: f.validTo })),
+          note: current.length === 0 && history.length === 0 ? 'no facts found' : undefined,
+        };
       },
     },
     {
