@@ -3,12 +3,14 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ToolDefinition } from '../agent/types.js';
+import { ReviewStore } from '../judge/store.js';
 
 /**
- * Self-review: Jarv runs its own health checks and reads its optimization plan,
- * so it can genuinely deliberate on how to improve itself (the "work on
- * yourself in VSCodium" flow). Deterministic — the model just reads the result
- * and proposes the next step.
+ * Self-review: Jarv runs its own health checks, reads its optimization plan, and
+ * reports the taste/review trend (from the P3 review log) so it can genuinely
+ * deliberate on how to improve itself (the "work on yourself in VSCodium" flow).
+ * Health checks are deterministic — the model just reads the result and proposes
+ * the next step.
  */
 
 const execFileAsync = promisify(execFile);
@@ -71,16 +73,37 @@ export function readPlan(): { exists: boolean; openItems: string[] } {
   }
 }
 
-export function selfReviewTools(): ToolDefinition[] {
+/** Read the taste/review trend from the review log. Null when not configured. */
+export async function readQuality(reviewsFile?: string): Promise<{
+  reviewCount: number;
+  latest?: { id: string; ts: string; total: number };
+  delta: number | null;
+} | null> {
+  if (!reviewsFile) return null;
+  const store = new ReviewStore(reviewsFile);
+  const s = await store.summary();
+  return {
+    reviewCount: s.count,
+    latest: s.latest,
+    delta: s.delta,
+  };
+}
+
+export function selfReviewTools(reviewsFile?: string): ToolDefinition[] {
   return [
     {
       name: 'self_review',
       system: 'autonomic',
       description:
-        'Run a self-review: run the test suite and typecheck of the Jarv Genie codebase, and read the optimization plan. Returns current health and the open optimization items. Use to deliberate on the next improvement to Jarv itself.',
+        'Run a self-review: run the test suite and typecheck of the Jarv Genie codebase, read the optimization plan, and report the taste/review trend (recent scores + whether quality is improving). Returns current health, the open optimization items, and the quality trend. Use to deliberate on the next improvement to Jarv itself.',
       inputSchema: { type: 'object', properties: {} },
       handler: async () => {
-        const [tests, typecheck, plan] = await Promise.all([runTests(), runTypecheck(), Promise.resolve(readPlan())]);
+        const [tests, typecheck, plan, quality] = await Promise.all([
+          runTests(),
+          runTypecheck(),
+          Promise.resolve(readPlan()),
+          readQuality(reviewsFile),
+        ]);
         const healthy = tests.ok && typecheck.ok;
         return {
           ok: healthy,
@@ -90,6 +113,7 @@ export function selfReviewTools(): ToolDefinition[] {
           healthy,
           planExists: plan.exists,
           openItems: plan.openItems,
+          quality,
           note: 'Open VSCodium at the repo and propose the next change; run self_review again to verify.',
         };
       },

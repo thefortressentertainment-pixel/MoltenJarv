@@ -37,7 +37,9 @@ import { deliveryLogTools } from '../tools/deliverylog.js';
 import { visionTools } from '../tools/vision.js';
 import { useToolTools } from '../tools/useTool.js';
 import { selfWakeTools } from '../tools/selfwake.js';
+import { judgeTools } from '../tools/judge.js';
 import { dataHome } from '../config/defaults.js';
+import path from 'node:path';
 
 const SESSION = 'default';
 
@@ -56,7 +58,7 @@ export async function buildAgent(): Promise<AgentContext> {
   const memory = buildMemory(config);
 
   const registry = new ToolRegistry();
-  registry.registerMany([...timeTools(), ...fileTools(), ...memoryTools(), ...webTools(), ...speechTools(), ...computerTools(), ...moltbookTools(), ...emailTools(), ...reminderTools(), ...schedulerTools(), ...systemTools(), ...uiTools(), ...drawTools(), ...telegramTools(), ...statusTools(), ...cameraTools(), ...calendarTools(), ...briefingTools(), ...selfReviewTools(), ...shutdownTools(), ...codeTools(), ...appsTools(), ...initiativeTools(), ...deliveryLogTools(), ...visionTools(), ...useToolTools(), ...selfWakeTools(dataHome())]);
+  registry.registerMany([...timeTools(), ...fileTools(), ...memoryTools(), ...webTools(), ...speechTools(), ...computerTools(), ...moltbookTools(), ...emailTools(), ...reminderTools(), ...schedulerTools(), ...systemTools(), ...uiTools(), ...drawTools(), ...telegramTools(), ...statusTools(), ...cameraTools(), ...calendarTools(), ...briefingTools(), ...selfReviewTools(path.join(config.memory.dir, 'reviews.json')), ...shutdownTools(), ...codeTools(), ...appsTools(), ...initiativeTools(), ...deliveryLogTools(), ...visionTools(), ...useToolTools(), ...selfWakeTools(dataHome()), ...judgeTools(path.join(config.memory.dir, 'reviews.json'))]);
 
   const { tools: externalTools, errors: externalErrors } = await loadExternalMcpTools(config.mcp.servers);
   registry.registerMany(externalTools);
