@@ -1,5 +1,5 @@
 import type { JarvGenieConfig, EndpointConfig } from '../config/index.js';
-import { resolveApiKey } from '../config/index.js';
+import { resolveApiKey, isLocalEndpoint } from '../config/index.js';
 import type { ComputerConfig } from '../computer/index.js';
 import { OpenAICompatibleProvider } from './openai.js';
 import type { ChatOptions, Provider } from './types.js';
@@ -12,8 +12,11 @@ export interface DoctorEntry {
   error?: string;
 }
 
-/** Only use the fallback when it can actually authenticate (or needs no key). */
+/** Only use the fallback when it can actually authenticate (or needs no key).
+ *  A local endpoint (Ollama/LLM Studio/vLLM on localhost) needs no key — only
+ *  remote fallbacks require a resolvable API key. */
 function fallbackReady(cfg: EndpointConfig): boolean {
+  if (isLocalEndpoint(cfg.baseUrl)) return true;
   if (!cfg.apiKey && !cfg.apiKeyEnv) return true;
   return Boolean(resolveApiKey(cfg));
 }
