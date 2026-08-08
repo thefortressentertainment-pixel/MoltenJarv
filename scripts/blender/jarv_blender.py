@@ -25,6 +25,7 @@ bl_info = {
 
 import json
 import os
+import threading
 import urllib.request
 from pathlib import Path
 
@@ -73,28 +74,77 @@ class JARV_OT_ask(bpy.types.Operator):
     bl_label = "Ask Jarv"
     bl_description = "Send the prompt in the Jarv panel to the Jarv Genie hub"
 
-    def execute(self, context):
+    _timer = None
+    _done = None
+    _result = {}
+    # Busy guard: only one in-flight request; pressing Enter AND the button can't stack.
+    _running = False
+
+    @classmethod
+    def busy(cls):
+        return cls._running
+
+    def invoke(self, context, event):
+        if JARV_OT_ask._running:
+            self.report({"WARNING"}, "Jarv is already working — wait for it to finish.")
+            return {"CANCELLED"}
         scn = context.scene
         message = scn.jarv_prompt.strip()
         if not message:
             self.report({"WARNING"}, "Type a prompt first")
             return {"CANCELLED"}
-
         prefs = context.preferences.addons[__name__].preferences
         hub = prefs.hub_url.strip() or DEFAULT_HUB
         token = prefs.token.strip() or _read_token()
 
+        JARV_OT_ask._running = True
+        scn.jarv_prompt = ""
         scn.jarv_reply = "..."
-        scn.jarv_status = f"asking {hub}…"
-        try:
-            reply = _ask_jarv(hub, token, message)
-        except Exception as exc:  # the hub is down or unreachable
-            reply = f"[could not reach Jarv hub at {hub}] {exc}"
-            scn.jarv_status = "connection failed"
-            self.report({"ERROR"}, "Jarv hub unreachable — is `jarv-genie hub` running?")
-        scn.jarv_reply = _safe_repr(reply or "(no reply)")
-        scn.jarv_status = "done"
-        return {"FINISHED"}
+        scn.jarv_status = f"asking {hub}… (do not press Enter again)"
+
+        self._done = threading.Event()
+        self._result = {}
+
+        def work():
+            try:
+                self._result = {"reply": _ask_jarv(hub, token, message)}
+            except Exception as exc:
+                self._result = {"error": str(exc)}
+            finally:
+                try:
+                    self._done.set()
+                except Exception:
+                    pass
+
+        threading.Thread(target=work, daemon=True).start()
+
+        wm = context.window_manager
+        self._timer = wm.event_timer_add(0.4, window=context.window)
+        wm.modal_handler_add(self)
+        return {"RUNNING_MODAL"}
+
+    def modal(self, context, event):
+        if event.type == "TIMER":
+            if not self._done.is_set():
+                return {"RUNNING_MODAL"}
+            wm = context.window_manager
+            wm.event_timer_remove(self._timer)
+            JARV_OT_ask._running = False
+            scn = context.scene
+            if "error" in self._result:
+                scn.jarv_reply = "[error] " + self._result["error"][:500]
+                scn.jarv_status = "connection failed"
+                self.report({"ERROR"}, "Jarv hub request failed/quit mid-flight.")
+            else:
+                scn.jarv_reply = _safe_repr(self._result.get("reply", "(no reply)"))
+                scn.jarv_status = "done"
+            if context.area:
+                context.area.tag_redraw()
+            return {"FINISHED"}
+        return {"PASS_THROUGH"}
+
+    def execute(self, context):
+        return self.invoke(context, None)
 
 
 class JARV_PT_panel(bpy.types.Panel):
@@ -107,10 +157,11 @@ class JARV_PT_panel(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         scn = context.scene
+        busy = JARV_OT_ask.busy()
 
         row = layout.row(align=True)
         row.prop(scn, "jarv_prompt", text="")
-        row.operator("jarv.ask", text="Ask Jarv", icon="GHOST_ENABLED")
+        row.operator("jarv.ask", text="Ask Jarv" if not busy else "Working…", icon="GHOST_ENABLED").enabled = not busy
 
         if scn.jarv_status:
             layout.label(text=scn.jarv_status)
