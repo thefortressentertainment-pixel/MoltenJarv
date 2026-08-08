@@ -115,11 +115,23 @@ if [ "${JARV_GENIE_ENABLE_VOICE:-0}" = "1" ]; then
   VOICE_SVC=(com.fortress.jarvgenie-voice)
 fi
 
-SERVICES=(com.fortress.jarvgenie-hub com.fortress.jarvgenie-heartbeat "${KEEPAWAKE_SVC[@]}" "${VOICE_SVC[@]}")
+# Footprint mode. By default only the HUB runs as an always-on Node daemon (it
+# serves /api/chat + /api/status — everything a phone, script, or Blender add-on
+# needs to prompt Jarv on demand). The heartbeat (scheduled/proactive) and the
+# telegram bridge (remote chat + consent via bot) are each a separate ~80MB Node
+# process; for a lean footprint (e.g. while Blender/Unreal is open) they are
+# OPT-IN and skipped unless JARV_GENIE_EXTRA_DAEMONS=1.
+#
+# Opt out:  JARV_GENIE_EXTRA_DAEMONS=1   → heartbeat + telegram also run.
+#           JARV_GENIE_EXTRA_DAEMONS=0   (default) → hub only (+ keepawake/voice).
+HEARTBEAT_SVC=()
+TELEGRAM_SVC=()
+if [ "${JARV_GENIE_EXTRA_DAEMONS:-0}" = "1" ]; then
+  HEARTBEAT_SVC=(com.fortress.jarvgenie-heartbeat)
 
-# Telegram bridge (remote chat + explicit-consent approvals) — needs only the
-# bot token; the first person to message the bot becomes the owner.
-if python3 -c "
+  # Telegram bridge (remote chat + explicit-consent approvals) — needs only the
+  # bot token; the first person to message the bot becomes the owner.
+  if python3 -c "
 import json,os
 try:
     s=json.load(open(os.path.expanduser('~/.jarv-genie/secrets.json')))
@@ -127,12 +139,16 @@ except Exception:
     s={}
 import sys; sys.exit(0 if s.get('TELEGRAM_BOT_TOKEN') else 1)
 " 2>/dev/null; then
-  write_plist "com.fortress.jarvgenie-telegram" "<string>telegram</string>" "$LAUNCH_DIR/com.fortress.jarvgenie-telegram.plist"
-  SERVICES+=(com.fortress.jarvgenie-telegram)
-  echo "telegram bridge configured — will run"
+    TELEGRAM_SVC=(com.fortress.jarvgenie-telegram)
+    echo "telegram bridge configured — will run"
+  else
+    echo "telegram bridge not configured (set TELEGRAM_BOT_TOKEN to enable)"
+  fi
 else
-  echo "telegram bridge not configured (set TELEGRAM_BOT_TOKEN to enable)"
+  echo "lean footprint mode — heartbeat + telegram are OPT-IN (JARV_GENIE_EXTRA_DAEMONS=1)"
 fi
+
+SERVICES=(com.fortress.jarvgenie-hub "${HEARTBEAT_SVC[@]}" "${KEEPAWAKE_SVC[@]}" "${VOICE_SVC[@]}" "${TELEGRAM_SVC[@]}")
 
 for svc in "${SERVICES[@]}"; do
   launchctl bootout "gui/$(id -u)/$svc" 2>/dev/null || true
