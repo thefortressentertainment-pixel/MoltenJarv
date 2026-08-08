@@ -129,17 +129,21 @@ without installing HA.
 See §B3. Not built now (privacy + 8 GB). Its event-driven capture + diarization +
 FTS + "pipes" (day-recap, meeting-summary) are the reference for B2 grown up.
 
-### P4. Life memory / memory extraction — `mem0` (T1, pattern reuse)
+### P4. Life memory / memory extraction — `mem0` (T1, pattern reuse) — ✅ implemented
 Apache-2.0. Jarv has semantic memory of *explicit facts* (`remember`/`recall`),
 but no **automatic extract-and-recollect loop** that pulls durable facts from
 conversations/task runs and stores them as small retrievable memories.
 - Port the **ADD-only extraction** LLM call (turn task-run transcripts + user
   messages into candidate facts → write via the existing `FactStore`, applying
   the update-don't-duplicate rule). Fully local (Ollama + local embeddings).
+  → `src/memory/extract.ts` (`extractFacts`), CLI `jarv-genie extract "<text>"`,
+  `source:'extraction'` provenance, dedup vs existing, fail-open. Tests:
+  4 new (`test/extract.test.ts`).
 - Adopt the **temporal/provenance schema from `getzep/graphiti` as a concept**:
   facts carry validity windows + episode provenance, and *stale facts are
   invalidated, not blindly overwritten* — implement in the existing JSON store,
-  not a graph DB (avoids Neo4j).
+  not a graph DB (avoids Neo4j). (Validity windows deferred to a follow-up; the
+  `extraction` source tag is the provenance seed.)
 
 ### P5. Personal knowledge ingestion / RAG — LlamaIndex pattern (T1)
 MIT. Jarv reads files on demand but has no **queryable index over one's own
@@ -166,7 +170,10 @@ runtime. T2: needs the extra RAM/cores.
 ## D. Sequencing and roadmap (hardware-aware)
 
 **Phase 1 — T1, high-leverage, no new heavy runtimes** (in dependency order)
-1. P4 memory-extraction loop (small, immediately useful, seeds everything).
+1. P4 memory-extraction loop ✅ `src/memory/extract.ts` + `jarv-genie extract` —
+   automatic durable-fact discovery from conversations/transcripts (ADD-only,
+   dedup, fail-open, `extraction` provenance). 328 tests passing. → next: P1
+   computer-use localization.
 2. P1 computer-use localization (+ batching + pruning + trajectories for the
    `judge`) — makes existing GUI/UI tools trustworthy.
 3. P2's **two portable patterns** (BM25 tool-pinning + read/write policy split).

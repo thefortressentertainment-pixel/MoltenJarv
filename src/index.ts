@@ -27,6 +27,7 @@ import { runMcpServer } from './mcp/server.js';
 import { getLinkStore, RemoteClient } from './remote/client.js';
 import { loadAgentConfig, recordDaemonCrash, resetDaemonCrashCount } from './scheduler/index.js';
 import { runDreamCommand } from './cli/dream.js';
+import { runExtractCommand } from './cli/extract.js';
 import { runPairCommand } from './cli/pair.js';
 import { runTrustCommand } from './cli/trust.js';
 import { serveUi, type UiServerOptions } from './ui/server.js';
@@ -74,6 +75,7 @@ Usage:
   jarv-genie voice --setup-piper   install neural TTS (Piper) for faster replies
   jarv-genie agent [schedule|list|run|once|remove]     scheduled briefings & reminders
   jarv-genie dream [--force] [--min-count N]   consolidate long-term memory now
+  jarv-genie extract "<conversation>"          auto-extract durable facts into memory
   jarv-genie agent schedule "@daily" "<prompt>" [--notify] [--speak]   add a schedule
   jarv-genie --doctor             check endpoints and memory
   jarv-genie --mcp [--transport http --port 3000]   run as an MCP server
@@ -451,6 +453,12 @@ async function main(): Promise<void> {
   if (raw[0] === 'dream') {
     const ctx = await buildAgent();
     await runDreamCommand(ctx, raw.slice(1));
+    return;
+  }
+
+  if (raw[0] === 'extract') {
+    const ctx = await buildAgent();
+    await runExtractCommand(ctx, raw.slice(1));
     return;
   }
 
