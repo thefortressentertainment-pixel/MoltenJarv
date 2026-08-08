@@ -73,13 +73,21 @@ it; runs `self_review`; and reports back. Iterate.
 
 ## Current health
 
-- Tests: 176 (175 passing, 0 failing)
-- Typecheck: clean
-- Model: deepseek-chat (primary) / qwen2.5:3b (local fallback)
-- Tools: 53; consent gate armed via Telegram (@MoltenJarvbot)
+- Tests: 361 (361 passing, 0 failing)
+- Typecheck: clean · Build: clean
+- Model: deepseek-chat (primary) / llama3.2 (local fallback) — BM25 tool-pinning
+  active (agent.toolPinning.maxTools = 12) for the small local model
+- Tools: ~98 registered; consent gate armed via Telegram; ~41 read-only tools,
+  4-class risk + read/write policy (policyFor) split
+- New capability (JARVIS blueprint, docs/jarvis-blueprint.md): memory-extraction
+  (`jarv-genie extract`), coordinate-localization click (`ui_click_at`),
+  personal-knowledge RAG (`rag_index/query/status`), self-learning skills
+  (`learn_skill`), and constraint-free hearing (`jarv-genie listen` → durable
+  `voice` memories). Index phase roadmaps live in the blueprint.
 - Services: hub (always-on, 0.0.0.0), heartbeat (schedules), telegram bridge
   (keep-awake), keepawake — all with full PATH via launchd
 - Hardening: crash-loop breaker + dead-lock recovery + tick isolation + service
   throttle (see above)
 - Deliveries: Delivery Track Record maintained (SHA-256 hash chain), verifiable
   via deliverylog_verify
+

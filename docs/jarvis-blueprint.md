@@ -214,12 +214,33 @@ runtime. T2: needs the extra RAM/cores.
 **Phase 2 — T1/T2**
 6. P6 self-learning skill caching ✅ `src/learn.ts` + `learn_skill` tool — verified
    run → reusable SKILL.md, judge-score gated. 351 tests passing.
-7. B2 diarization + spoken-instruction store maturity. [pending]
+7. B2 spoken-instruction store maturity — ✅ the `listen` loop persists each spoken
+   instruction as a durable `voice` fact (recallable). **Diarization** (who spoke
+   when) is deferred to the T2/T3 screenpipe companion — the memory store it
+   would feed already exists and is ready.
 
 **Phase 3 — T2/T3 (hardware gates, documented not built)**
-8. P3 screenpipe companion (ambient room capture + life memory).
-9. P7 concurrent sub-agents.
+8. P3 screenpipe companion (ambient room capture + life memory + speaker diarization).
+9. P7 concurrent sub-agents (needs the extra RAM/cores).
 10. P2 Home Assistant control (via ha-mcp) — when HA lives off this Mac.
+
+## Hardware-upgrade roadmap (how Jarv upgrades with the machine)
+
+Every T1 pattern below was built to serve double duty: it is lean today and
+*composed* so a bigger machine unlocks more without a rewrite.
+
+| Capability (T1, shipped) | On 8 GB today | What upgrading unlocks (natural next step) |
+|---|---|---|
+| BM25 tool-pinning (maxTools 12) | Tight schema for the local fallback/cloud model | Raise `maxTools` toward ~30 and/or run a bigger local model; the pinner is model-agnostic |
+| `learn_skill` caching | Verified run → reusable SKILL.md | Whole GUI-trajectory auto-capture (OS-Copilot full variant); more skills per machine |
+| RAG (`rag_index/query`) | Plain-text corpus, local `nomic-embed-text` | MinerU pass for PDFs/DOCX + bigger embedding/long-context model; index grows with RAM |
+| `listen` voice loop | Wake-word, single utterance, `voice` memory facts | screenpipe companion: true ambient room capture + diarization + day-recap pipes |
+| P6 self-learning + `judge` | Judge-gated skill creation | Concurrent skill authors (sub-agents) + richer trajectories |
+
+**Upgrade triggers (concrete):** ≥16 GB unified memory → enable sub-agents (P7),
+screenpipe diarization, and MinerU document parsing (T2). Dedicated always-on hub
+machine → full ambient home-base (T3). No code rewrite: the T1 modules are
+already composed to take larger context/models by configuration.
 
 Each harvest lands with tests (`npm test`), a `self_review`, and consent behind
 the Telegram gate, tracked in its own `*-harvest-plan.md`. This blueprint is the
