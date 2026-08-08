@@ -7,6 +7,7 @@ import { VERSION } from '../config/defaults.js';
 import { buildMemory, type Memory } from '../memory/index.js';
 import { loadExternalMcpTools } from '../mcp/client.js';
 import { ModelRouter } from '../providers/index.js';
+import { internetChannelsDoctor, renderInternetDoctor } from '../web/channels.js';
 import { fileTools } from '../tools/filesystem.js';
 import { computerTools } from '../tools/computer.js';
 import { memoryTools } from '../tools/memory.js';
@@ -197,6 +198,12 @@ export async function runDoctor(ctx: AgentContext): Promise<void> {
 
   const computer = await import('../computer/index.js');
   process.stdout.write(`[${computer.computerStatus(config).implemented ? 'OK' : '--'}] computer: ${computer.computerStatus(config).note}\n`);
+
+  // Internet channel routes (Agent-Reach-style multi-backend doctor).
+  process.stdout.write('\nInternet channels:\n');
+  for (const line of renderInternetDoctor(await internetChannelsDoctor()).split('\n')) {
+    process.stdout.write(line + '\n');
+  }
 
   for (const err of externalErrors) process.stdout.write(`[FAIL] external mcp: ${err}\n`);
 }
