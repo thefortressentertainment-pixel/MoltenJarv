@@ -29,7 +29,7 @@ test('reflex blocks code_edit on credential files', () => {
 });
 
 test('reflex marks routine safe organs as fast and lets others pass', () => {
-  for (const name of ['get_datetime', 'system_status', 'process_list', 'moltbook_feed', 'recall', 'code_search', 'web_search', 'file_list_any']) {
+  for (const name of ['get_datetime', 'system_status', 'process_list', 'calendar_agenda', 'recall', 'code_search', 'web_search', 'file_list_any']) {
     assert.strictEqual(reflex(call(name)).kind, 'fast', `${name} is a routine fast-path reflex`);
   }
   assert.strictEqual(reflex(call('app_command', { app: 'spotify', action: 'play' })).kind, 'pass', 'consequential actions still reach the cortex');

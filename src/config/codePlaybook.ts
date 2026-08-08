@@ -10,7 +10,7 @@ export const CODE_PLAYBOOK = `
 This is YOUR repo at /Users/tfe/jarv-genie. Code here the way a careful engineer would.
 
 Understand the code before touching it:
-- Repo layout: src/cli (commands/entry), src/agent (Agent loop + TaskRunner), src/tools (tool definitions, registered in src/cli/index.ts buildAgent), src/config, src/memory, src/scheduler, src/moltbook, src/ui + src/hub (web), src/telegram, src/voice, test/*.test.ts, docs/.
+- Repo layout: src/cli (commands/entry), src/agent (Agent loop + TaskRunner), src/tools (tool definitions, registered in src/cli/index.ts buildAgent), src/config, src/memory, src/scheduler, src/ui + src/hub (web), src/telegram, src/voice, test/*.test.ts, docs/.
 - TypeScript ESM with ".js" import specifiers; "type": "module"; tests use node:test via npm test.
 - Match the existing style: read neighboring files for naming, imports, types, and how tools/helpers are structured. Reuse existing helpers (dataHome, getSecretStore, execFileAsync, appendDelivery, etc.) instead of reimplementing them.
 - Before editing, use code_search with SPECIFIC identifiers (function/class names, exact strings) and read the surrounding file. Never guess at an API — check src/ and test/ for how it's actually done.

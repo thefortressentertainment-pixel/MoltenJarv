@@ -19,7 +19,7 @@ Status of each item: `[x]` done, `[ ]` open.
 - [x] Open Clock → Alarms (`open_alarms`)
 - [x] Draw shapes (`draw_shape`, ImageMagick) and open them
 - [x] Reminders (create/list/delete) and scheduler (cron, names accepted)
-- [x] Web (search + read), email (SMTP/IMAP), Moltbook, voice, memory, monitors
+- [x] Web (search + read), email (SMTP/IMAP), voice, memory, monitors
 - [x] `jarv-genie perms` one-time macOS permission setup (Accessibility OK)
 - [x] Reliability: TaskRunner (plan→execute→report) on BOTH Telegram and the
       web hub; honest failures; empty-output nudge; no fake tool calls

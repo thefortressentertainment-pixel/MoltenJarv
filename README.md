@@ -138,7 +138,7 @@ terminal on any machine: `jarv-genie link http://100.x.y.z:3001 <token>` then
 
 Run the Telegram bridge so Jarv is reachable from your phone's Telegram app, no
 matter where you are. Consequential actions (opening apps, AppleScript control,
-creating/deleting reminders, scheduling, sending email, posting to Moltbook,
+creating/deleting reminders, scheduling, sending email,
 running shell commands, writing/deleting files) are **gated**: Jarv pauses,
 sends you an approval request over Telegram, and only acts after you reply
 **yes**. No channel = gate open (you're at the machine). While the bridge runs

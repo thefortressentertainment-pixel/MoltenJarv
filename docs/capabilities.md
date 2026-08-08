@@ -63,13 +63,13 @@ Legend for consent: **R** = read-only (never prompts) · **C** = consent-gated
 | Shut down / restart the Mac | `shutdown_mac` | C |
 | Review / optimize itself | `self_review` | R |
 | Talk (voice) / hear | `speak_text`, voice pipeline | R |
-| Moltbook (agent social) | `moltbook_*` | C (posts) / R (reads) |
+| Web (search + read) | `web_search`/`web_read` | R (hosted) |
 
 ## Proactive & inventive
 
 | Manual ability | Jarv command | Consent |
 | --- | --- | --- |
-| Invent opportunities / ideas on a cadence | daily 09:00 scan (web + Moltbook + capabilities → `initiative_propose`) | n/a (notifies you) |
+| Invent opportunities / ideas on a cadence | daily 09:00 scan (web + capabilities → `initiative_propose`) | n/a (notifies you) |
 | Track ideas through approval → execution | `initiative_propose/list/status`; 15:00 check starts approved ones | R / C |
 | Review & improve itself | `self_review` | R |
 

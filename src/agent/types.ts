@@ -19,7 +19,7 @@ export type BodySystem =
   | 'voice'       // speaking and hearing surfaces
   | 'autonomic'   // self-regulation: monitors, scheduler, shutdown
   | 'immune'      // defense and verification
-  | 'integration'; // external channels: Telegram, web, calendar, email, Moltbook
+  | 'integration'; // external channels: Telegram, web, calendar, email
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';

@@ -174,7 +174,7 @@ portable bit, not four files.
 ## Explicitly NOT porting (over-engineered for a local single-user assistant)
 
 - **The 25+ connector setup-wizard / OAuth / relay ecosystem** (`connectors`,
-  `cloud.py`, `relay_client.py`). Jarv already has Telegram/Moltbook; if more
+  `cloud.py`, `relay_client.py`). Jarv already has Telegram; if more
   integrations are wanted, reuse Jarv's MCP client at vendor MCP URLs with a
   **pinned tool allowlist** (the `tool_defs.py:306-361` pattern).
 - **Multi-inbox named routing**, PKCE/Auth0 sign-in, personas marketplace/git-install.

@@ -31,8 +31,7 @@ export function capabilityCovers(a: Capability, b: Capability): boolean {
 /** Tools that only need to read (never write to user state outside memory/read caches). */
 export const READ_ONLY_TOOLS = new Set([
   'get_datetime', 'system_status', 'process_list', 'app_status', 'calendar_agenda',
-  'reminder_list', 'schedule_list', 'moltbook_status', 'moltbook_home', 'moltbook_feed',
-  'moltbook_search', 'moltbook_notifications', 'shutdown_status', 'deliverylog_verify',
+  'reminder_list', 'schedule_list', 'shutdown_status', 'deliverylog_verify',
   'self_review', 'list_facts', 'recall', 'file_read', 'file_list', 'file_list_any',
   'code_search', 'web_search', 'web_read', 'file_find', 'clipboard_get', 'vision_analyze',
   'camera_capture', 'screen_read', 'screen_capture', 'read_event', 'briefing_get',

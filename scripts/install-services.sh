@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install the Jarv Genie launchd services on macOS:
 #   - hub: always-on web hub bound to 0.0.0.0 (phone/LAN/Tailscale access, token-auth on /api/*)
-#   - agent: scheduled daemon (Moltbook heartbeat, monitors, briefings)
+#   - agent: scheduled daemon (monitors, briefings)
 #
 # Usage: bash scripts/install-services.sh
 set -eo pipefail

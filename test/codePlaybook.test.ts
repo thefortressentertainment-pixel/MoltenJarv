@@ -27,7 +27,7 @@ test('CODE_PLAYBOOK is wired into the TaskRunner system prompt for code tasks on
   // A code-touching task keeps the playbook, so verification and housekeeping rules apply.
   assert.match(sysPrompt.systemPrompt('refactor the taskrunner typescript'), /Coding & housekeeping/);
   assert.match(sysPrompt.systemPrompt('run npm test'), /Never leave the build broken/);
-  // A non-coding task (Moltbook sweep, briefing, ops) drops the ~2.4KB playbook from the prompt.
-  assert.doesNotMatch(sysPrompt.systemPrompt('check my Moltbook notifications'), /Coding & housekeeping/);
+  // A non-coding task (social sweep, briefing, ops) drops the ~2.4KB playbook from the prompt.
+  assert.doesNotMatch(sysPrompt.systemPrompt('check my notifications'), /Coding & housekeeping/);
   assert.doesNotMatch(sysPrompt.systemPrompt(), /Coding & housekeeping/);
 });

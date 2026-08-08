@@ -119,7 +119,7 @@ export interface Policy {
  *  unless the operator explicitly adds them to fullAuto. These are irreversible /
  *  off-machine or can permanently damage the system. */
 export const DEFAULT_NEVER_AUTO = [
-  'shutdown', 'email_send', 'telegram_send', 'moltbook_post', 'moltbook_reply',
+  'shutdown', 'email_send', 'telegram_send',
 ];
 
 function defaultPolicy(): Policy {

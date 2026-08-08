@@ -4,7 +4,7 @@ import { dataHome } from './config/defaults.js';
 
 /**
  * Initiative store: Jarv's proactive idea/opportunity ledger. Jarv invents
- * initiatives on a cadence (web trends + Moltbook + its own capabilities),
+ * initiatives on a cadence (web trends + its own capabilities),
  * tracks them here, surfaces them to the user for approval, and (with consent)
  * executes the approved ones. This is what makes Jarv more than a
  * react-to-the-prompt assistant.

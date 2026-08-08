@@ -16,7 +16,6 @@ import { ToolRegistry } from '../tools/registry.js';
 import { validateToolset } from '../tools/registry.js';
 import { timeTools } from '../tools/time.js';
 import { webTools } from '../tools/web.js';
-import { moltbookTools } from '../tools/moltbook.js';
 import { emailTools } from '../tools/email.js';
 import { reminderTools } from '../tools/reminders.js';
 import { schedulerTools } from '../tools/scheduler.js';
@@ -61,7 +60,7 @@ export async function buildAgent(): Promise<AgentContext> {
   const memory = buildMemory(config);
 
   const registry = new ToolRegistry();
-  registry.registerMany([...timeTools(), ...fileTools(), ...memoryTools(), ...webTools(), ...speechTools(), ...computerTools(), ...moltbookTools(), ...emailTools(), ...reminderTools(), ...schedulerTools(), ...systemTools(), ...uiTools(), ...drawTools(), ...telegramTools(), ...statusTools(), ...cameraTools(), ...calendarTools(), ...briefingTools(), ...selfReviewTools(path.join(config.memory.dir, 'reviews.json')), ...shutdownTools(), ...codeTools(), ...appsTools(), ...initiativeTools(), ...deliveryLogTools(), ...visionTools(), ...useToolTools(), ...selfWakeTools(dataHome()), ...judgeTools(path.join(config.memory.dir, 'reviews.json')), ...learnTools(config.agent.skillsPath), ...ragTools(path.join(dataHome(), 'rag')), ...verifyTools()]);
+  registry.registerMany([...timeTools(), ...fileTools(), ...memoryTools(), ...webTools(), ...speechTools(), ...computerTools(), ...emailTools(), ...reminderTools(), ...schedulerTools(), ...systemTools(), ...uiTools(), ...drawTools(), ...telegramTools(), ...statusTools(), ...cameraTools(), ...calendarTools(), ...briefingTools(), ...selfReviewTools(path.join(config.memory.dir, 'reviews.json')), ...shutdownTools(), ...codeTools(), ...appsTools(), ...initiativeTools(), ...deliveryLogTools(), ...visionTools(), ...useToolTools(), ...selfWakeTools(dataHome()), ...judgeTools(path.join(config.memory.dir, 'reviews.json')), ...learnTools(config.agent.skillsPath), ...ragTools(path.join(dataHome(), 'rag')), ...verifyTools()]);
 
   const { tools: externalTools, errors: externalErrors } = await loadExternalMcpTools(config.mcp.servers);
   registry.registerMany(externalTools);

@@ -11,7 +11,7 @@ import { sha256Json } from '../attest.js';
  * After any shipped task, Jarv appends a timestamped entry to the Delivery
  * Track Record (`track-record/delivery-log.md`). This is the audit trail behind
  * delivered work — private operating hygiene that doubles as a verifiable
- * Moltbook trust signal. Because `log_delivery` is a real registered tool and
+ * trust signal. Because `log_delivery` is a real registered tool and
  * this module lives in the framework, logging is part of the machine, not a
  * convention Jarv has to remember.
  *
@@ -197,7 +197,7 @@ export async function verifyChain(): Promise<{
   };
 }
 
-/** A short, grounded Moltbook post announcing the chain root (for consent-gated publishing). */
+/** A short, grounded attestation announcing the chain root (for consent-gated publishing). */
 export function attestationText(chain: Awaited<ReturnType<typeof verifyChain>>): string {
   return (
     `I keep a cryptographically chained delivery record — every entry is hash-linked to the one before it, so the log is append-only and tamper-evident.\n\n` +
@@ -265,9 +265,9 @@ export function deliveryLogTools(): ToolDefinition[] {
       name: 'log_delivery',
       system: 'immune',
       description:
-        'Append a timestamped, hash-chained entry to the Delivery Track Record (track-record/delivery-log.md). Use AFTER any shipped task — an investor digest run, ai-papers briefs, a system op, a Moltbook/social post, or anything delivered. Category must be one of: ' +
+        'Append a timestamped, hash-chained entry to the Delivery Track Record (track-record/delivery-log.md). Use AFTER any shipped task — an investor digest run, ai-papers briefs, a system op, a social post, or anything delivered. Category must be one of: ' +
         ALLOWED.join(', ') +
-        '. Each entry is linked to the previous by SHA-256, so the log is append-only and verifiable. Keeps a self-maintaining audit trail that doubles as a Moltbook trust signal.',
+        '. Each entry is linked to the previous by SHA-256, so the log is append-only and verifiable. Keeps a self-maintaining audit trail that doubles as a verifiable trust signal.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -292,7 +292,7 @@ export function deliveryLogTools(): ToolDefinition[] {
       name: 'deliverylog_verify',
       system: 'immune',
       description:
-        'Recompute the SHA-256 hash chain over the Delivery Track Record and report whether it is intact, the current chain root, and a publishable attestation. Read-only. Use before sharing or posting the record on Moltbook, or to prove a delivery claim.',
+        'Recompute the SHA-256 hash chain over the Delivery Track Record and report whether it is intact, the current chain root, and a publishable attestation. Read-only. Use before sharing or posting the record, or to prove a delivery claim.',
       inputSchema: { type: 'object', properties: {} },
       handler: async () => {
         // Backfill once if the log predates hashing (e.g. entries with no hash line).

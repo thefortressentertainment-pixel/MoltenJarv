@@ -29,7 +29,7 @@ test('appendDelivery writes chained entries and verifyChain confirms the chain',
     assert.strictEqual(r1.ok, true);
     assert.match(r1.hash, /^[0-9a-f]{64}$/);
 
-    const r2 = await appendDelivery('Posted trust signal on Moltbook', 'social', 'post 831e7712 live');
+    const r2 = await appendDelivery('Posted trust signal', 'social', 'post 831e7712 live');
     assert.strictEqual(r2.ok, true);
     assert.notStrictEqual(r2.hash, r1.hash);
 

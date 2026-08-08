@@ -92,7 +92,7 @@ the code that implements it. Status: `[x]` implemented · `[~]` partial · `[ ]`
 | Human part | Jarv organ | Implementation | Status |
 | --- | --- | --- | --- |
 | **Skin** — the barrier | Hub auth, Tailscale boundary, 0600 secrets | `src/hub/auth.ts`, `src/config/secrets.ts` | `[x]` |
-| **White blood cells** — attack intruders | Credential guard, phish-flagging, treat other AIs as unvetted | Reflexes (`taskrunner`), Moltbook guardrails, prompt rules | `[x]` |
+| **White blood cells** — attack intruders | Credential guard, phish-flagging, treat other AIs as unvetted | Reflexes (`taskrunner`), prompt rules | `[x]` |
 | **Memory of past threats** | Learned security adaptation | *gap* — see below | `[ ]` |
 
 ## Endocrine system (drives & hormones)
@@ -120,7 +120,7 @@ Every tool is tagged with the body system it belongs to (`ToolDefinition.system`
 - `voice` — speaking and hearing surfaces
 - `autonomic` — self-regulation, monitors, scheduler, shutdown
 - `immune` — defense and verification
-- `integration` — external channels: Telegram, web, calendar, email, Moltbook, initiative
+- `integration` — external channels: Telegram, web, calendar, email, initiative
 
 The registry exposes `bySystem()`, `senses()`, `effectors()`, and `organs()` so
 the agent can *reason about its own body*: "what can you see?" is now a real

@@ -27,7 +27,7 @@ or N/A (unrealistic for a personal device — e.g. driving a piloted flight suit
 |---|---|---|---|
 | 1 | Natural-language + voice UI | **Covered** | whisper STT + Piper/`say` TTS, wake word `--wake`, streaming `--live`. |
 | 2 | Scheduling, organizing, relaying comms | **Covered** | calendar, reminders, scheduler, `telegram_send`. |
-| 3 | Business/company admin | **Covered** | email, Moltbook, Delivery Track Record. |
+| 3 | Business/company admin | **Covered** | email, Delivery Track Record. |
 | 4 | Diagnostics / status | **Covered** | `system_status`, `self_review`, `judge`. |
 | 5 | Info retrieval / queries | **Covered** | web_search/read, file_find, `recall`. |
 | 6 | Security / authorization | **Covered** | consent gate, risk model, fail-closed, hash-chained delivery log. |

@@ -21,7 +21,7 @@ Extended `~/.jarv-genie/trusted-device.json` policy for the verified device:
   - `ask` → requires confirmation (everything not explicitly allow-listed).
 
 **always-confirm safety net** (`DEFAULT_NEVER_AUTO`): `shutdown`, `email_send`,
-`telegram_send`, `moltbook_post`, `moltbook_reply` — these keep requiring
+`telegram_send` — these keep requiring
 confirmation even in execute mode *unless* the operator explicitly `allow`s one.
 
 ## Controls
