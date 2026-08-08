@@ -36,6 +36,7 @@ export const READ_ONLY_TOOLS = new Set([
   'self_review', 'list_facts', 'recall', 'file_read', 'file_list', 'file_list_any',
   'code_search', 'web_search', 'web_read', 'file_find', 'clipboard_get', 'vision_analyze',
   'camera_capture', 'screen_read', 'screen_capture', 'read_event', 'briefing_get',
+  'rag_query', 'rag_status',
 ]);
 
 /** Tools that execute or spawn processes (not merely read/write files). */

@@ -157,12 +157,18 @@ conversations/task runs and stores them as small retrievable memories.
   not a graph DB (avoids Neo4j). (Validity windows deferred to a follow-up; the
   `extraction` source tag is the provenance seed.)
 
-### P5. Personal knowledge ingestion / RAG — LlamaIndex pattern (T1)
+### P5. Personal knowledge ingestion / RAG — LlamaIndex pattern (T1) — ✅ landed
 MIT. Jarv reads files on demand but has no **queryable index over one's own
 docs/emails/exports**. Port the lightweight pipeline
 `SimpleDirectoryReader → vector index → query_engine`, fully local (Ollama +
 the installed `nomic-embed-text`). Lazily index `~/Documents`, email exports,
 etc. — paired with MinerU (already surveyed) for messy/scanned PDFs.
+→ `src/rag.ts` (chunkText/discoverFiles/buildIndex/queryIndex, cosine+Jaccard
+fallback, mtime-keyed incremental index so only changed files re-embed) +
+`src/tools/rag.ts` (`rag_index`/`rag_query`/`rag_status`, local embeddings via
+config). Index persisted to `~/.jarv-genie/rag/index.json`. Tests: 7 new
+(`test/rag.test.ts`). PDFs/DOCX (heavy parsing) deferred to a MinerU-backed
+T3 pass. Full suite 358 passing, typecheck + build clean.
 
 ### P6. Self-learning skills — `OS-Copilot/FRIDAY` (T1/T2) — ✅ landed (T1 read/write)
 MIT. Watch how a task completes; on success, **record a reusable procedure/skill**
@@ -196,7 +202,8 @@ runtime. T2: needs the extra RAM/cores.
 3. P2 portable patterns ✅ BM25 tool-pinning (`src/tools/pinning.ts`, wired into
    `TaskRunner` behind `agent.toolPinning.maxTools` = 12) + read/write policy split
    (`src/risk.ts` `policyFor`). 342 tests passing.
-4. P5 personal-knowledge RAG (local, one-time index + query tool). [pending]
+4. P5 personal-knowledge RAG ✅ `src/rag.ts` + `rag_index/rag_query/rag_status`
+   (local Ollama-embedding index over the user's own files). 358 tests passing.
 5. B2 **`jarv-genie listen`** — the optional constraint-free voice loop (opt-in). [pending]
 
 **Phase 2 — T1/T2**
