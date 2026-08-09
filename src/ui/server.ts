@@ -266,7 +266,13 @@ function handler(ctx: AgentContext, opts: UiServerOptions, host: string) {
         if (!message) return json(res, 400, { error: 'message is required' });
         try {
           const { runBlenderTask } = await import('../blender/runner.js');
-          const result = await runBlenderTask(ctx.config, { message, model: body.model ? String(body.model) : undefined });
+          const parsedSteps = Number(body.maxSteps);
+          const result = await runBlenderTask(ctx.config, {
+            message,
+            model: body.model ? String(body.model) : undefined,
+            maxSteps: Number.isFinite(parsedSteps) && parsedSteps > 0 ? parsedSteps : undefined,
+            local: body.local === true,
+          });
           return json(res, 200, result);
         } catch (err) {
           return json(res, 502, { error: err instanceof Error ? err.message : String(err) });

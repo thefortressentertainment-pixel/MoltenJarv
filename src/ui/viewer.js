@@ -156,10 +156,11 @@ async function refineLive() {
   refineBtn.textContent = 'Sending…';
   showLog(canvasWrap, `🧊 sending: ${msg}`);
   try {
+    const wantsImagePath = /(?:\.(png|jpe?g|jpeg|webp)|make it look like this|reference)/i.test(msg);
     const res = await fetch('/api/blender', {
       method: 'POST',
       headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg }),
+      body: JSON.stringify({ message: msg, maxSteps: wantsImagePath ? 22 : undefined }),
     });
     const body = await res.json();
     if (!res.ok) throw new Error((body && body.error) || `build failed: HTTP ${res.status}`);
@@ -212,10 +213,14 @@ async function hubBuild() {
   blenderBar.classList.add('blender-busy');
   showLog(canvasWrap, `🧊 sending: ${msg}`);
   try {
+    // Complex/reference-driven builds need more steps; request a higher budget
+    // so the model can use the vision spec + build parts + render-refine without
+    // hitting the default cap. Steps are sequential, so this is time, not RAM.
+    const wantsImagePath = /(?:\.(png|jpe?g|jpeg|webp)|make it look like this|reference)/i.test(msg);
     const res = await fetch('/api/blender', {
       method: 'POST',
       headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg }),
+      body: JSON.stringify({ message: msg, maxSteps: wantsImagePath ? 24 : 18 }),
     });
     const body = await res.json();
     if (!res.ok) throw new Error((body && body.error) || `build failed: HTTP ${res.status}`);

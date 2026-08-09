@@ -360,7 +360,13 @@ export async function runBlenderTask(config: JarvGenieConfig, input: BlenderRunI
   const registry = blenderToolRegistry(config);
   const tools = registry.list();
   const toolNames = tools.map((t) => t.name);
-  const maxSteps = Math.min(input.maxSteps ?? 14, 16);
+  // Step budget: give reference-image builds extra room (they burn steps on the
+  // vision-informed shape-spec + a larger per-part build + render-refine loop).
+  // Steps are SEQUENTIAL model/tool turns, not parallel RAM — raising the budget
+  // costs wall-clock time, not memory, so it stays RAM-light on the 8GB M1.
+  const hardCap = 28;
+  const defaultSteps = extractAbsoluteImagePath(input.message) ? 22 : 16;
+  const maxSteps = Math.min(Math.max(input.maxSteps ?? defaultSteps, 4), hardCap);
 
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   // Inject the persisted Blender named-parts snapshot so a follow-up prompt
@@ -433,7 +439,7 @@ export async function runBlenderTask(config: JarvGenieConfig, input: BlenderRunI
     }
   }
 
-  return { text: `Reached the ${maxSteps}-step budget for this Blender task; background work may continue. For more, split the request.`, steps, toolCalls, provider, model, local: usedLocal };
+  return { text: `Reached the ${maxSteps}-step budget for this Blender build (${steps} steps used). The in-progress result is exported; refine it in the 3D viewer to keep improving it. For a bigger single build, pass a higher maxSteps.`, steps, toolCalls, provider, model, local: usedLocal };
 }
 
 /** Export the LIVE Blender scene to a GLB for the web UI viewer. Sends a bpy
