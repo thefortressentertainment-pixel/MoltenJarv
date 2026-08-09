@@ -180,8 +180,73 @@ async function refineLive() {
 if (refineBtn) refineBtn.addEventListener('click', refineLive);
 if (refineInput) refineInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') refineLive(); });
 
+// Hub Blender build bar: prompt Jarv to build/refine in the LIVE open Blender,
+// then re-export and render it in the viewer. Reuses the same {ok,text}|{error}
+// endpoint contract as the viewer's Refine box.
+const blenderBar = document.querySelector('.blender-bar');
+const blenderInput = document.getElementById('blenderInput');
+const blenderSend = document.getElementById('blenderSend');
+const blenderStatus = document.getElementById('blenderStatus');
+const blenderView = document.getElementById('blenderView');
+
+// Reflect live-bridge state on the bar (best-effort; a 409 means Blender is closed).
+async function refreshBlenderStatus() {
+  if (!blenderStatus) return;
+  try {
+    const res = await fetch('/preview.glb', { headers: authHeaders() });
+    blenderStatus.textContent = res.ok
+      ? 'live — last build ready to view'
+      : blenderView && blenderView.dataset.pending ? 'building…' : 'not live — open Blender with the Jarv add-on';
+    blenderStatus.classList.toggle('on', res.ok);
+  } catch {
+    blenderStatus.textContent = 'not live — open Blender with the Jarv add-on';
+    blenderStatus.classList.remove('on');
+  }
+}
+
+async function hubBuild() {
+  const msg = (blenderInput.value || '').trim();
+  if (!msg) return;
+  blenderSend.disabled = true;
+  blenderSend.textContent = 'Building…';
+  blenderBar.classList.add('blender-busy');
+  showLog(canvasWrap, `🧊 sending: ${msg}`);
+  try {
+    const res = await fetch('/api/blender', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error((body && body.error) || `build failed: HTTP ${res.status}`);
+    showLog(canvasWrap, `✅ Jarv: ${(body && body.text) ? body.text.slice(0, 160) : 'done'}`);
+    // Re-export and show the updated model in the viewer.
+    const ex = await fetch('/api/blender/export', { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' } });
+    const bx = await ex.json();
+    if (!ex.ok || !bx.ok) throw new Error((bx && bx.error) || 'export failed');
+    await loadPreview();
+    refreshBlenderStatus();
+  } catch (err) {
+    showLog(canvasWrap, `⚠️ ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    blenderSend.disabled = false;
+    blenderSend.textContent = 'Build';
+    blenderBar.classList.remove('blender-busy');
+    refreshBlenderStatus();
+  }
+}
+
+if (blenderSend) blenderSend.addEventListener('click', hubBuild);
+if (blenderInput) blenderInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') hubBuild(); });
+if (blenderView) blenderView.addEventListener('click', () => {
+  viewer.classList.remove('hidden');
+  blenderView.dataset.pending = '1';
+  loadPreview();
+});
+refreshBlenderStatus();
+
 // Expose a global so the chat UI can open the viewer.
 window.JarvViewer = {
-  open() { viewer.classList.remove('hidden'); loadPreview(); },
+  open() { viewer.classList.remove('hidden'); loadPreview(); refreshBlenderStatus(); },
   refresh() { loadPreview(); },
 };

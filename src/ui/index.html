@@ -53,6 +53,18 @@
     </div>
   </section>
 
+  <section class="blender-bar" aria-label="Build in Blender">
+    <div class="blender-head">
+      <span class="viewer-title">Build in Blender</span>
+      <span id="blenderStatus" class="blender-status">not live — open Blender with the Jarv add-on</span>
+    </div>
+    <div class="blender-row">
+      <input id="blenderInput" class="text" placeholder="Describe a model for Blender, e.g. 'build an orc' — runs in your open Blender (Enter to send)" autocomplete="off" />
+      <button id="blenderSend" class="btn primary">Build</button>
+      <button id="blenderView" class="btn ghost" title="Open the 3D preview of the current Blender scene">3D</button>
+    </div>
+  </section>
+
   <footer class="composer">
     <button id="micBtn" class="btn mic" title="Talk to Jarv Genie — click to start, it stops when you pause">
       <span class="mic-icon"></span>

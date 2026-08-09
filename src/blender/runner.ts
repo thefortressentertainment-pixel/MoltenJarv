@@ -6,7 +6,7 @@ import { fileTools } from '../tools/filesystem.js';
 import { webTools } from '../tools/web.js';
 import { extractTextToolCalls } from '../agent/agent.js';
 import type { JarvGenieConfig } from '../config/index.js';
-import { describeToSpec } from './reference.js';
+import { describeToSpec, extractAbsoluteImagePath } from './reference.js';
 import { loadBlenderSnapshot, renderBlenderSnapshot, saveBlenderSnapshot } from './state.js';
 
 /**
@@ -101,9 +101,13 @@ function bpyExecTool(config: JarvGenieConfig): ToolDefinition {
       // Persist the named-parts snapshot so a FOLLOW-UP prompt can refine the same
       // build (isolated to the Blender runner; no bleed into Jarv's memory).
       if (r.ok && r.mode === 'live' && r.result && typeof r.result === 'object') {
-        const res = r.result as { objects?: Array<{ name: string; type?: string; location?: number[]; bounds?: number[][] }> };
+        const res = r.result as { objects?: Array<{ name: string; type?: string; location?: number[]; bounds?: number[][]; parent?: string | null }> };
         if (res.objects) {
-          try { void saveBlenderSnapshot(res.objects); } catch { /* best-effort */ }
+          try {
+            const parents: Record<string, string> = {};
+            for (const o of res.objects) if (o.name && o.parent) parents[o.name] = o.parent;
+            void saveBlenderSnapshot(res.objects, parents);
+          } catch { /* best-effort */ }
         }
       }
       return { ok: r.ok, mode: r.mode, result: r.result };
@@ -170,6 +174,8 @@ SHAPING & DETAIL (kill the flat/blocky look):
 - For smooth organic objects (a dog, a character limb), make the base shape then add a Subdivision Surface modifier (bpy.ops.object.modifier_add(type='SUBSURF'); modifier.levels=2) so it is not a blocky box.
 - Faces/heads/limbs taper: use cones, stretched spheres, and beveled boxes, not plain cubes. A "leg"/"arm"/"beak"/"ear" is a shaped 3D body, never a bare box.
 - Group detail: once the silhouette is right, add distinguishing detail (eyes, ears, beak, wings, textures via modifier/sculpt) in the SAME or following prompt — not invisible.
+- SCULPT-DEEPER for organic subjects (creatures/characters/busts): the add-on already auto-smooths with subsurf+bevel after every build, so DON'T pile on nested subsurfs. Instead invest effort in the BASE SILHOUETTE: use spheres/capsules/cylinders that actually overlap and blend (e.g. a jaw is a flattened sphere tucked under the skull, ears are stretched cones on the head), and shape detail with MANY small well-placed parts, not one giant blob. Add asymmetric, distinctive masses (snout, brow ridge, chest, haunches, horns, tusks) as their own named parts so they read as modeled, not as a cluster of equal primitives. Aim for the PROFILE to be believable from the side, not just the front.
+- DEPTH over symmetry: characters/creatures should have real thickness (deep chest, defined limbs, a neck that connects head to torso), NOT flat billboards or disconnected floating shapes. When a part should taper or bulge, scale/rotate that part's ORIGINAL geometry — don't fake it with extra flat copies.
 
 COLOR (apply the described colors — this must not be skipped):
 - When the prompt names any color/material (red, blue, green, gold, wood, pine, oak, metal), the FINALIZE material you apply MUST be that color. A "red cube" is RED. Use the named color map in the FINALIZE snippet and set base_rgb = named['<that word>'].
@@ -189,7 +195,7 @@ REFINE-TO-DETAIL (stop producing clustered geometric shapes — close the loop w
 - If a reference image is available (bpy_reference gave a spec), compare the rendered result's proportions/colors against that spec and adjust named parts to match.
 
 GENERAL:
-- REFERENCE IMAGE IS OPTIONAL, NOT REQUIRED. You do NOT need an image to build. By default, build from your OWN knowledge + the user's free-text description (e.g. "a sturdy pine workbench, thick top, 4 legs"). Use bpy_reference ONLY when the user explicitly gives an absolute image path (e.g. "/Users/.../wreath.jpg") or says "make it look like this picture" — then call it FIRST to extract proportions, then build with bpy_exec.
+- REFERENCE IMAGE IS OPTIONAL, NOT REQUIRED. IMAGE INPUT: you CANNOT read image bytes — your raw text model rejects them ("does not support image input"). If a reference image path is present in your prompt, a shape-spec ALREADY appears in the user message (analyzed by a separate vision model) — build from THAT spec text with bpy_exec; do NOT attempt to open/read the image file yourself. The bpy_reference tool is a fallback for when no spec was injected. By default, build from your OWN knowledge + the user's free-text description (e.g. "a sturdy pine workbench, thick top, 4 legs").
 - REAL 3D, not flat: a "leg"/"column"/"handle"/"stem" is a 3D body (cylinder/rounded column), NOT a flat plane. A bench leg is a squat cylinder or beveled box — never a 2D rectangle. Give parts thickness and proper X/Y/Z scale.
 - You already know what common things look like (wreath, dog, chair, table). Use that + the description; do not stall waiting for an image.
 - FINALIZE PASS (ALWAYS, at the end): run ONE bpy_exec that (1) assigns a material to every object, (2) adds a SUN light if none exists, (3) SMOOTH-SHADES the objects. Use THIS VERBATIM bpy (copy exactly):` +
@@ -318,6 +324,31 @@ export function blenderToolRegistry(config: JarvGenieConfig): ToolRegistry {
   return registry;
 }
 
+/** Deterministically read a reference image (if the prompt names one) and return
+ *  a terse shape-spec hint to inject into the user message. This runs the vision
+ *  model DIRECTLY (not via a model-decided tool call), so a "make it look like
+ *  this picture: /path.jpg" task is NEVER lost to a text model that can't see
+ *  images. RAM-light: one local llava call, no extra models, best-effort.
+ *
+ *  Reads the user's absolute image path (png/jpg/jpeg) and feeds it to the
+ *  structural vision spec. Returns text the builder should follow, or '' when no
+ *  image path is present / nothing usable was extracted. */
+async function referenceHintFor(config: JarvGenieConfig, message: string): Promise<string> {
+  const path = extractAbsoluteImagePath(message);
+  if (!path) return '';
+  const comp = (config as unknown as { computer?: { visionModel?: string } }).computer ?? {};
+  try {
+    const spec = await describeToSpec(path, config, comp.visionModel);
+    if (!spec.parts || spec.parts.length === 0) {
+      return `\n[Reference image at "${path}" described as: ${spec.summary.slice(0, 200)}] Use these proportions and build the shape with bpy_exec primitives — do NOT read the image bytes yourself (your text model cannot see image input); rely on this description only.`;
+    }
+    return `\n[Reference image at "${path}" analyzed by the local vision model — build from THIS structured spec, do NOT try to read the image yourself (your model has no image input). Shapel spec:\n${JSON.stringify(spec).slice(0, 1500)}\nParent the parts; match these proportions.]`;
+  } catch (err) {
+    // Vision is optional; fall back to plain text so the build still happens.
+    return `\n[Note: reference image "${path}" could not be analyzed by local vision (${err instanceof Error ? err.message : String(err)}). Build from your own knowledge of the subject described. Do NOT attempt to read the image file yourself — your model cannot see image input.]`;
+  }
+}
+
 /** Run the Blender task through the minimal, RAM-bounded loop. */
 export async function runBlenderTask(config: JarvGenieConfig, input: BlenderRunInput): Promise<BlenderRunResult> {
   const forceLocal = input.local === true;
@@ -336,7 +367,11 @@ export async function runBlenderTask(config: JarvGenieConfig, input: BlenderRunI
   // "remembers" the current build and refines it by name (isolated to the runner).
   const snapshot = await loadBlenderSnapshot();
   const snapshotHint = renderBlenderSnapshot(snapshot);
-  const userMessage = snapshotHint ? `${input.message}\n\n${snapshotHint}` : input.message;
+  // Deterministically read any reference image named in the prompt into a
+  // shape-spec hint, so the text model is never expected to decode an image it
+  // can't see (DeepSeek rejects image input with "does not support image input").
+  const referenceHint = await referenceHintFor(config, input.message);
+  const userMessage = [input.message, referenceHint, snapshotHint].filter(Boolean).join('\n');
   const messages: ChatMessage[] = [
     { role: 'system', content: BLENDER_SYSTEM(today) },
     { role: 'user', content: userMessage },
@@ -414,7 +449,8 @@ export async function runBlenderExport(): Promise<{ ok: boolean; path: string; e
     `# selection-based GLB export needs at least one selected object; ensure one`,
     `if len(bpy.context.selected_objects) == 0 and bpy.data.objects:`,
     `    bpy.data.objects[0].select_set(True)`,
-    `bpy.ops.export_scene.gltf(filepath=target, export_format='GLB', use_selection=False)`,
+    `# apply_modifiers=True so subsurf/bevel/displacement appear in the viewer GLB`,
+    `bpy.ops.export_scene.gltf(filepath=target, export_format='GLB', use_selection=False, apply_modifiers=True)`,
     `print('EXPORTED', target, os.path.getsize(target))`,
   ].join('\n');
   try {

@@ -14,6 +14,22 @@ import { describeImage } from '../computer/index.js';
  * no GPU; the agent only reads the returned JSON spec.
  */
 
+/** Match an absolute local image path (png/jpg/jpeg) anywhere in a prompt, so
+ *  we can deterministically run reference-vision WITHOUT relying on the text
+ *  model deciding to call a tool. Returns the first absolute image path, or null. */
+export function extractAbsoluteImagePath(text: string): string | null {
+  if (!text) return null;
+  // Absolute posix or macOS path, optionally wrapped in quotes/brackets/parens,
+  // ending in a common image extension.
+  const re = /(?:['"([]?|\b)(\/[^\s'"()[\]{}<>]+\.(?:png|jpe?g|webp|bmp|gif))['")]?[\]]?/gi;
+  // Prefer a bare path match before a bracketed one; take the first.
+  const m = text.match(re);
+  if (!m) return null;
+  // Trim surrounding quote/bracket/paren delimiters.
+  const raw = m[0].replace(/^['"([\[]+|['")\]]+$/g, '');
+  return raw.length > 4 ? raw : null;
+}
+
 /** The structured contract we ask the vision model to return (blender-vision-agent). */
 const SPEC_SYSTEM = `You analyze a reference image and emit a structured 3D shape spec that can be rebuilt in Blender from simple primitives (cube, sphere, cylinder, cone, torus, plane) and booleans.
 CRITICAL: the subject may be asymmetric and detailed — capture its true PROPORTIONS and ARRANGEMENT, not a literal 'it's a cup'. For example a wreath = a circular ring of many small leaves/branches; a dog = one body + head + 4 legs in a pose.

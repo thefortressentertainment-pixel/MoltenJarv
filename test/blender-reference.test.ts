@@ -1,6 +1,22 @@
 import assert from 'node:assert';
 import { test } from 'node:test';
-import { describeToSpec, parseSpecJson } from '../src/blender/reference.js';
+import { describeToSpec, parseSpecJson, extractAbsoluteImagePath } from '../src/blender/reference.js';
+
+test('extractAbsoluteImagePath finds an absolute image path in a prompt', () => {
+  const p = extractAbsoluteImagePath('make it look like this picture [/Users/me/Downloads/orc-male-01.jpg]');
+  assert.strictEqual(p, '/Users/me/Downloads/orc-male-01.jpg');
+});
+
+test('extractAbsoluteImagePath finds a bare / wrapped absolute path', () => {
+  assert.strictEqual(extractAbsoluteImagePath('use /tmp/ref.png') , '/tmp/ref.png');
+  assert.strictEqual(extractAbsoluteImagePath('(refer to "/Users/a/b.png")') , '/Users/a/b.png');
+});
+
+test('extractAbsoluteImagePath returns null when no absolute image path is present', () => {
+  assert.strictEqual(extractAbsoluteImagePath('build an orc') , null);
+  assert.strictEqual(extractAbsoluteImagePath('use ref.png (relative, not absolute)') , null);
+  assert.strictEqual(extractAbsoluteImagePath('') , null);
+});
 
 test('parseSpecJson extracts a wrapped JSON spec', () => {
   const raw = 'here is your spec:\n```json\n{"shape_summary":"a wreath","parts":[{"name":"ring","primitive":"torus"}],\n"proportions":{"width_over_height":1.2,"depth_over_width":0.1}}\n```';
