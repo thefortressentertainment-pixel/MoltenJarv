@@ -32,7 +32,12 @@ const flag = (k, d) => { const i = args.indexOf(k); return i >= 0 ? Number(args[
 // comfortably free, else 256. Override with --octree N.
 const explicitOctree = args.includes('--octree');
 const quantize = flag('--quantize', 4);
-const steps = flag('--steps', 30);
+// --sym: for perfectly front-facing / symmetric references, Hunyuan's shape stage
+// can collapse into a flat slab. Bumping guidance+steps grounds the reconstruction
+// more tightly. Use for frontal symmetric refs (you found angled refs work cleanly).
+const sym = args.includes('--sym');
+const steps = sym ? flag('--steps', 60) : flag('--steps', 30);
+const guidance = sym ? 7.0 : undefined;
 let octree = flag('--octree', 0);
 if (!explicitOctree) {
   let pct = Infinity;
@@ -77,7 +82,9 @@ if (freePct !== Infinity && freePct < 25) {
 console.log(`[craft] hy3d shape image=${image} quantize=${quantize} octree=${octree} steps=${steps} (memory free ≈${freePct === Infinity ? 'n/a' : freePct}%)`);
 console.log('[craft] this is a multi-GB Metal compute — please be patient (30s-few min).');
 const started = Date.now();
-promisify(execFile)(bin, ['shape', image, '-o', out, '--weights', weights, '--quantize', String(quantize), '--octree', String(octree), '--steps', String(steps)],
+const argv = ['shape', image, '-o', out, '--weights', weights, '--quantize', String(quantize), '--octree', String(octree), '--steps', String(steps)];
+if (guidance !== undefined) argv.push('--guidance', String(guidance));
+promisify(execFile)(bin, argv,
   { timeout: 15 * 60_000, maxBuffer: 8 * 1024 * 1024 },
 ).then(async (res) => {
   const created = fs.existsSync(out) && fs.statSync(out).size > 0;
