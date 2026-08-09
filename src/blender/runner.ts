@@ -252,23 +252,59 @@ function bpyReferenceTool(config: JarvGenieConfig): ToolDefinition {
   };
 }
 
-/** Render a viewport PNG of the live Blender scene to /tmp via the bridge.
- *  Returns the path, or an error. RAM-light (renders in the already-open Blender). */
+/** Render a PNG of the live Blender scene to /tmp via the bridge.
+ *  Returns the path, or an error. RAM-light (renders in the already-open Blender).
+ *
+ *  WHY EEVEE, NOT OPENGL: `bpy.ops.render.opengl` renders the 3D viewport in
+ *  whatever shading mode the user happens to be in (often Solid/gray), so builds
+ *  looked gray. EEVEE always renders the materials. We also frame the camera on
+ *  the scene's bounding box (tight fit + good angle) so the colored model fills
+ *  the frame instead of floating tiny in a gray world. */
 export async function renderLiveScenePNG(outPath = '/tmp/jarv_blender_report.png', size = 512): Promise<{ ok: boolean; path: string; error?: string }> {
   const code = [
-    `import bpy, os`,
+    `import bpy, os, math`,
     `sc = bpy.context.scene`,
-    `prev = (sc.render.filepath, sc.render.resolution_x, sc.render.resolution_y)`,
+    `prev = (sc.render.filepath, sc.render.resolution_x, sc.render.resolution_y, sc.render.engine)`,
     `try:`,
+    `    # Use EEVEE so materials/colors are actually rendered.`,
+    `    if 'BLENDER_EEVEE_NEXT' in bpy.types.RenderSettings.bl_rna.properties['engine'].enum_items:`,
+    `        sc.render.engine = 'BLENDER_EEVEE_NEXT'`,
+    `    else:`,
+    `        sc.render.engine = 'BLENDER_EEVEE'`,
     `    sc.render.filepath = '${outPath}'`,
     `    sc.render.resolution_x = ${size}; sc.render.resolution_y = ${size}`,
     `    sc.render.image_settings.file_format = 'PNG'`,
-    `    bpy.ops.render.opengl(write_still=True, view_context=True)`,
+    `    # Frame a camera on the scene's bounding box (meshes only).`,
+    `    meshes = [o for o in bpy.data.objects if o.type == 'MESH']`,
+    `    if not meshes:`,
+    `        raise RuntimeError('no mesh objects to render')`,
+    `    import mathutils`,
+    `    lo = mathutils.Vector((1e9, 1e9, 1e9))`,
+    `    hi = mathutils.Vector((-1e9, -1e9, -1e9))`,
+    `    for o in meshes:`,
+    `        for c in o.bound_box:`,
+    `            w = o.matrix_world @ mathutils.Vector(c)`,
+    `            for i in range(3):`,
+    `                lo[i] = min(lo[i], w[i]); hi[i] = max(hi[i], w[i])`,
+    `    center = (lo + hi) * 0.5`,
+    `    extents = hi - lo`,
+    `    radius = max(extents.length / 2.0, 1.0) * 0.55`,
+    `    # A flattering 3/4 angle, slightly above.`,
+    `    cam_slot = sc.camera`,
+    `    if cam_slot is None and bpy.data.cameras:`,
+    `        cam_ob = bpy.data.objects.new('JarvCam', bpy.data.cameras.new('JarvCam'))`,
+    `        sc.collection.objects.link(cam_ob); cam_slot = cam_ob; sc.camera = cam_ob`,
+    `    if cam_slot is not None:`,
+    `        from mathutils import Vector as _V`,
+    `        cam_slot.location = _V((radius*0.85, -radius*0.85, center.z + radius*0.55))`,
+    `        direction = center - cam_slot.location`,
+    `        cam_slot.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()`,
+    `    bpy.ops.render.render(write_still=True)`,
     `    print('RENDERED', os.path.getsize('${outPath}'))`,
     `except Exception as e:`,
     `    print('RENDER_ERR', repr(e))`,
     `finally:`,
-    `    sc.render.filepath, sc.render.resolution_x, sc.render.resolution_y = prev`,
+    `    sc.render.filepath, sc.render.resolution_x, sc.render.resolution_y, sc.render.engine = prev`,
   ].join('\n');
   const r = await runLiveBpy(code);
   if (!r.ok) return { ok: false, path: outPath, error: r.mode === 'no-blender' ? 'no live Blender open' : 'render bpy error' };
