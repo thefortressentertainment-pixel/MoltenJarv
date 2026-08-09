@@ -74,6 +74,15 @@ export async function freeMemPct(): Promise<number | null> {
   }
 }
 
+/** Pick a shape octree based on free RAM: more faces (finer mesh) when the
+ *  machine has headroom, conservative when tight. 256 base; 320 when comfortably
+ *  free. The craft's memory-pressure guard still refuses below 25% free. */
+export async function adaptiveOctree(): Promise<number> {
+  const pct = await freeMemPct();
+  if (pct === null) return 256;
+  return pct >= 50 ? 320 : 256;
+}
+
 export interface CraftResult {
   ok: boolean;
   glb?: string;
@@ -119,7 +128,9 @@ export async function runCraft(
     'shape', imagePath, '-o', out,
     '--weights', weights,
     '--quantize', String(opts.quantize ?? 4),
-    '--octree', String(opts.octree ?? 256),
+    // Adaptive octree: finer mesh (more faces) when RAM headroom allows; the caller
+    // can pin it explicitly via opts.octree. Base 256; 320 if comfortably free.
+    '--octree', String(opts.octree ?? await adaptiveOctree()),
     '--steps', String(opts.steps ?? 30),
   ];
   if (opts.guidance !== undefined) args.push('--guidance', String(opts.guidance));

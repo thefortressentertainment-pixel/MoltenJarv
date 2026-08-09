@@ -28,9 +28,21 @@ if (!image) {
   process.exit(2);
 }
 const flag = (k, d) => { const i = args.indexOf(k); return i >= 0 ? Number(args[i + 1]) : d; };
-const octree = flag('--octree', 256);
+// Adaptive octree: finer mesh (more faces) when RAM headroom allows; 320 if
+// comfortably free, else 256. Override with --octree N.
+const explicitOctree = args.includes('--octree');
 const quantize = flag('--quantize', 4);
 const steps = flag('--steps', 30);
+let octree = flag('--octree', 0);
+if (!explicitOctree) {
+  let pct = Infinity;
+  try {
+    const mp = execFileSync('memory_pressure', [], { encoding: 'utf8' });
+    const pm = /System-wide memory free percentage:\s+(\d+)%/.exec(mp);
+    if (pm) pct = Number(pm[1]);
+  } catch {}
+  octree = pct >= 50 ? 320 : 256;
+}
 
 if (!fs.existsSync(bin)) { console.error('[craft] hy3d binary missing at', bin); process.exit(1); }
 if (!fs.existsSync(path.join(weights, 'model.fp16.safetensors'))) { console.error('[craft] shape weights missing'); process.exit(1); }
