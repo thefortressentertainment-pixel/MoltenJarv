@@ -80,7 +80,9 @@ export async function freeMemPct(): Promise<number | null> {
 export async function adaptiveOctree(): Promise<number> {
   const pct = await freeMemPct();
   if (pct === null) return 256;
-  return pct >= 50 ? 320 : 256;
+  if (pct >= 65) return 384;   // comfortably free -> finest, most faces
+  if (pct >= 50) return 320;
+  return 256;
 }
 
 export interface CraftResult {

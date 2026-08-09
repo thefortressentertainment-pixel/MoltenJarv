@@ -38,6 +38,10 @@ const quantize = flag('--quantize', 4);
 const sym = args.includes('--sym');
 const steps = sym ? flag('--steps', 60) : flag('--steps', 30);
 const guidance = sym ? 7.0 : undefined;
+// --auto-refine N: after crafting, run N headless mesh-sharpening rounds on the
+// same mesh (smooth + subsurf-up + clean) to raise surface fidelity toward the
+// reference it was generated from.
+const refineRounds = flag('--auto-refine', 0);
 let octree = flag('--octree', 0);
 if (!explicitOctree) {
   let pct = Infinity;
@@ -46,7 +50,7 @@ if (!explicitOctree) {
     const pm = /System-wide memory free percentage:\s+(\d+)%/.exec(mp);
     if (pm) pct = Number(pm[1]);
   } catch {}
-  octree = pct >= 50 ? 320 : 256;
+  octree = pct >= 65 ? 384 : pct >= 50 ? 320 : 256;
 }
 
 if (!fs.existsSync(bin)) { console.error('[craft] hy3d binary missing at', bin); process.exit(1); }
@@ -98,7 +102,21 @@ promisify(execFile)(bin, argv,
     const dom = await regionColorsSync(image);
     const cleaned = await directClean(out, dom);
     if (!cleaned.ok) console.warn('[craft] cleanup skipped:', cleaned.error || '');
-    console.log(`[craft] DONE in ${secs}s -> ${out} (${(fs.statSync(out).size / 1e6).toFixed(1)} MB). Tray preserved/clean` + (dom.length ? ` + ${dom.length} region colors matched (${dom.map((c) => 'rgb(' + c.map((n) => Math.round(n * 255)).join(',') + ')').join(', ')})` : ' (no color match)') + `. Load in Blender: File>Import>glTF 2.0.`);
+    // Auto-refine: sharpen the mesh in-place against its reference-derived shape.
+    let refineNote = '';
+    if (refineRounds > 0) {
+      try {
+        for (let r = 1; r <= refineRounds; r++) {
+          console.log(`[craft] auto-refine round ${r}/${refineRounds} (sharpen: smooth + subsurf-up + clean)...`);
+          const rr = await refineMeshSync(out, r);
+          if (!rr.ok) { refineNote = ` (auto-refine round ${r} stopped: ${rr.error || ''})`; break; }
+        }
+        refineNote = refineNote || ` + auto-refined x${refineRounds}`;
+      } catch (e) {
+        refineNote = ' (auto-refine failed: ' + (e instanceof Error ? e.message : String(e)) + ')';
+      }
+    }
+    console.log(`[craft] DONE in ${secs}s -> ${out} (${(fs.statSync(out).size / 1e6).toFixed(1)} MB). Tray preserved/clean` + refineNote + (dom.length ? ` + ${dom.length} region colors matched (${dom.map((c) => 'rgb(' + c.map((n) => Math.round(n * 255)).join(',') + ')').join(', ')})` : '') + `. Load in Blender: File>Import>glTF 2.0.`);
   } catch (err) {
     console.warn('[craft] cleanup failed (craft itself succeeded):', err instanceof Error ? err.message : String(err));
     console.log(`[craft] DONE in ${secs}s -> ${out} (${(fs.statSync(out).size / 1e6).toFixed(1)} MB). Load via bpy_import_craft to strip the tray + color.`);
@@ -178,19 +196,17 @@ meshes=[o for o in bpy.data.objects if o.type=='MESH']
 if not meshes: raise SystemExit('NO_MESH')
 mesh=meshes[-1]
 bpy.ops.object.select_all(action='DESELECT'); mesh.select_set(True); bpy.context.view_layer.objects.active=mesh
-_verts=[v.co for v in mesh.data.vertices]; _lo=min(v.z for v in _verts)
-_hist=collections.Counter(round(v.z,2) for v in _verts)
-def _wa(z):
-    vs=[v for v in _verts if abs(v.z-z)<0.02]
-    return max((math.hypot(v.x,v.y) for v in vs), default=0.0)
-_tt=_lo
-for z in sorted(_hist):
-    if z-_lo>0.20: break
-    if _wa(z)>0.5: _tt=z
-_cut=_tt+0.04
-bm=bmesh.new(); bm.from_mesh(mesh.data)
-bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.z<_cut], context='VERTS')
-bm.to_mesh(mesh.data); bm.free(); mesh.data.update()
+_verts=[v.co for v in mesh.data.vertices]; _lo=min(v.z for v in _verts); _hi=max(v.z for v in _verts)
+# CONSERVATIVE: only remove a genuinely-flat, thin co-planar sheet at the very bottom
+# (a real breakaway disc). Broad Hunyuan3D feet are NOT a disc — never amputate them.
+_b0=[v for v in _verts if v.z-_lo<0.02]
+_flat=(max(v.z for v in _b0)-min(v.z for v in _b0)) if _b0 else 0.0
+_np=len([v for v in _verts if v.z-_lo<0.004])
+_disc=('True' if (_np>50 and _np>len(_verts)*0.004 and _flat<0.02) else 'False')
+if _disc=='True':
+    bm=bmesh.new(); bm.from_mesh(mesh.data)
+    bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.z-_lo<0.004], context='VERTS')
+    bm.to_mesh(mesh.data); bm.free(); mesh.data.update()
 ${colorBake}bpy.ops.object.select_all(action='SELECT')
 bpy.ops.export_scene.gltf(filepath=${JSON.stringify(glb)}, use_selection=False, export_format='GLB')
 print('CLEAN_OK', len(mesh.data.vertices))
@@ -198,6 +214,39 @@ print('CLEAN_OK', len(mesh.data.vertices))
   const tmp = '/tmp/jarv_clean_glb.mjs_tmp.py';
   fs.writeFileSync(tmp, script);
   try { await promisify(execFile)(blender, ['--background', '--python', tmp], { timeout: 120_000 }); return { ok: fs.statSync(glb).size > 0 }; }
+  catch (err) { return { ok: false, error: err?.message }; }
+  finally { try { fs.unlinkSync(tmp); } catch {} }
+}
+
+/** Headless mesh-sharpen pass: import the GLB, smooth + subsurf-up + clean, and
+ *  re-export. Each round raises surface fidelity (round = subsurf levels). RAM-safe
+ *  (spawn-and-exit; Blender must be closed). */
+async function refineMeshSync(glb, round) {
+  const blender = '/Applications/Blender.app/Contents/MacOS/Blender';
+  if (!fs.existsSync(blender)) return { ok: false, error: 'Blender not found' };
+  const script = `import bpy
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.import_scene.gltf(filepath=${JSON.stringify(glb)})
+meshes=[o for o in bpy.data.objects if o.type=='MESH']
+if not meshes: raise SystemExit('NO_MESH')
+mesh=meshes[-1]
+bpy.ops.object.select_all(action='DESELECT'); mesh.select_set(True); bpy.context.view_layer.objects.active=mesh
+# smooth the surface, then subsurf UP for a finer cage, then decimate-clean to keep RAM sane
+bpy.ops.object.shade_smooth()
+bpy.ops.object.modifier_add(type='SMOOTH'); bpy.context.object.modifiers[-1].factor=0.6
+bpy.ops.object.modifier_apply(modifier=bpy.context.object.modifiers[-1].name)
+bpy.ops.object.modifier_add(type='SUBSURF'); bpy.context.object.modifiers[-1].levels=${round}
+bpy.ops.object.modifier_apply(modifier=bpy.context.object.modifiers[-1].name)
+# re-smooth to remove faceting from the raised octree cage
+bpy.ops.object.modifier_add(type='SMOOTH'); bpy.context.object.modifiers[-1].factor=0.5
+bpy.ops.object.modifier_apply(modifier=bpy.context.object.modifiers[-1].name)
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.export_scene.gltf(filepath=${JSON.stringify(glb)}, use_selection=False, export_format='GLB')
+print('REFINED', len(mesh.data.vertices))
+`;
+  const tmp = '/tmp/jarv_refine.mjs_tmp.py';
+  fs.writeFileSync(tmp, script);
+  try { await promisify(execFile)(blender, ['--background', '--python', tmp], { timeout: 150_000 }); return { ok: fs.statSync(glb).size > 0 }; }
   catch (err) { return { ok: false, error: err?.message }; }
   finally { try { fs.unlinkSync(tmp); } catch {} }
 }
