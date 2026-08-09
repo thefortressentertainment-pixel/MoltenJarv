@@ -8,6 +8,7 @@ import { extractTextToolCalls } from '../agent/agent.js';
 import type { JarvGenieConfig } from '../config/index.js';
 import { describeToSpec, extractAbsoluteImagePath } from './reference.js';
 import { BASE_HUMANOID_SNIPPET } from './basemesh.js';
+import { searchPolyHavenAssets, resolvePolyHavenFile, downloadPolyHavenFile } from './polyhaven.js';
 import { loadBlenderSnapshot, renderBlenderSnapshot, saveBlenderSnapshot } from './state.js';
 
 /**
@@ -36,6 +37,7 @@ const BLENDER_TOOL_NAMES = new Set<string>([
   'run_shell',
   'bpy_exec',
   'bpy_base_mesh',
+  'bpy_polyhaven',
   'bpy_reference',
   'bpy_render_report',
   'file_read', 'file_write', 'file_list', 'file_delete',
@@ -161,6 +163,88 @@ function bpyBaseMeshTool(config: JarvGenieConfig): ToolDefinition {
   };
 }
 
+/** A bpy_polyhaven tool: fetch a real CC0 PBR texture or HDRI from PolyHaven and
+ *  apply it in the live scene (real materials + realistic environment lighting),
+ *  which makes a reference-driven render far more photographic than a flat color.
+ *  RAM-light: on-demand HTTP download straight into the already-open Blender. */
+function bpyPolyHavenTool(config: JarvGenieConfig): ToolDefinition {
+  return {
+    name: 'bpy_polyhaven',
+    system: 'sense',
+    description:
+      'Pull a real CC0 (public-domain) PBR texture or HDRI from PolyHaven and apply it in the live Blender scene. Pass a material/lighting keyword (e.g. "leather", "wood", "grass", "metal", "studio"). For a texture, it downloads the actual Diffuse map and builds a material named mat_<asset> with a texture node you can assign to an object (e.g. bpy.data.materials["mat_..."]). For an HDRI it sets the world environment for realistic lighting. Use this to give a build real materials + lighting for a photoreal render. Returns the asset name + the material/HDRI to use.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        keyword: { type: 'string', description: 'Material or lighting keyword to search PolyHaven (e.g. "leather", "grass", "studio", "forest").' },
+        kind: { type: 'string', description: '"textures" (default) to get a PBR material, or "hdris" to set world lighting.' },
+      },
+      required: ['keyword'],
+    },
+    handler: async (args) => {
+      const keyword = String(args.kind === 'hdris' ? args.keyword ?? '' : args.keyword ?? 'leather').trim();
+      const kind = String(args.kind ?? 'textures') === 'hdris' ? 'hdris' : 'textures';
+      if (!keyword) return { ok: false, error: 'keyword is required' };
+      try {
+        const search = await searchPolyHavenAssets(keyword, kind);
+        if (!search.ok) return { ok: false, error: search.error ? `no results for '${keyword}': ${search.error}` : `no PolyHaven ${kind} matched '${keyword}'` };
+        // Prefer an exact/name match, else first result.
+        const asset = search.assets.find((a) => a.name.toLowerCase().includes(keyword.toLowerCase())) ?? search.assets[0];
+        if (!asset) return { ok: false, error: `no PolyHaven ${kind} matched '${keyword}'` };
+        const resolved = await resolvePolyHavenFile(asset.id, kind, '1k');
+        if (!resolved.ok || !resolved.url) return { ok: false, error: resolved.error ?? 'no downloadable file' };
+        const dest = `/tmp/jarv_ph_${asset.id.replace(/[^a-zA-Z0-9_-]/g, '_')}.${resolved.ext ?? 'jpg'}`;
+        await downloadPolyHavenFile(resolved.url, dest);
+        const applyCode =
+          kind === 'hdris'
+            ? [
+                'import bpy',
+                `world = bpy.context.scene.world`,
+                `if world is None:`,
+                `    world = bpy.data.worlds.new("World")`,
+                `    bpy.context.scene.world = world`,
+                `world.use_nodes = True`,
+                `n = world.node_tree.nodes.get("JarvHDRI") or world.node_tree.nodes.new("ShaderNodeTexEnvironment")`,
+                `n.name = "JarvHDRI"`,
+                `n.image = bpy.data.images.load("${dest}")`,
+                `bg = world.node_tree.nodes.get("Background") or world.node_tree.nodes.new("ShaderNodeBackground")`,
+                `for c in world.node_tree.links:`,
+                `    if c.from_node == n:`,
+                `        world.node_tree.links.remove(c)`,
+                `world.node_tree.links.new(n.outputs["Color"], bg.inputs["Color"])`,
+              ].join('\n')
+            : [
+                'import bpy, os',
+                `mat = bpy.data.materials.get("mat_${asset.id}") or bpy.data.materials.new(name="mat_${asset.id}")`,
+                `mat.use_nodes = True`,
+                `ns = mat.node_tree.nodes; ns.clear()`,
+                `out = ns.new("ShaderNodeOutputMaterial")`,
+                `bsdf = ns.new("ShaderNodeBsdfPrincipled")`,
+                `tex = ns.new("ShaderNodeTexImage")`,
+                `tex.image = bpy.data.images.load("${dest}")`,
+                `mat.node_tree.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])`,
+                `mat.node_tree.links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])`,
+              ].join('\n');
+        const r = await runLiveBpy(applyCode);
+        if (!r.ok) return { ok: false, mode: r.mode, result: r.result };
+        return {
+          ok: true,
+          mode: r.mode,
+          asset: asset.name,
+          material: kind === 'textures' ? `mat_${asset.id}` : undefined,
+          kind,
+          note:
+            kind === 'textures'
+              ? `Material "${asset.name}" created as mat_${asset.id}. Assign it to objects, e.g. for o in bpy.data.objects: if o.type=='MESH': o.data.materials.append(bpy.data.materials["mat_${asset.id}"])`
+              : `HDRI "${asset.name}" applied to the world for realistic lighting.`,
+        };
+      } catch (err) {
+        return { ok: false, error: `polyhaven failed: ${err instanceof Error ? err.message : String(err)}` };
+      }
+    },
+  };
+}
+
 export interface BlenderRunInput {
   message: string;
   /** Blender path override; defaults to the primary (smart) model. */
@@ -226,6 +310,7 @@ SHAPING & DETAIL (kill the flat/blocky look):
 COLOR (apply the described colors — this must not be skipped):
 - When the prompt names any color/material (red, blue, green, gold, wood, pine, oak, metal), the FINALIZE material you apply MUST be that color. A "red cube" is RED. Use the named color map in the FINALIZE snippet and set base_rgb = named['<that word>'].
 - Do not default to a neutral gray when a color word is present — the gray auto-shade is only a fallback for when NO color was mentioned.
+- For REAL materials/lighting that make a render look photographic, call bpy_polyhaven: give it a material keyword (leather, wood, grass, metal, brick, marble...) to fetch a real CC0 PBR texture and build a mat_<name> you assign to objects; or kind="hdris" with a lighting keyword (studio, forest, sunset...) to set realistic world environment lighting. Use this instead of a flat color when the task implies a real surface (e.g. "leather pouch", "wooden table", "photoreal orc") — it dramatically improves fidelity.
 
 CHARACTERS & COMPLEX MODELS (when the task is a named character, creature, or multi-part object):
 - BASE-FIRST for humanoid/biped characters (orc, human, goblin, elf, warrior, etc.): call bpy_base_mesh to drop in the single-smooth-mesh "Base_Humanoid" silhouette FIRST, then COLOR it (e.g. MAT green orc skin), SCULPT/tune its named proportions (broaden shoulders, add a snout/tusks/ears/jaw), and POSE it. Do NOT rebuild a biped from many disconnected boxes — the base already has attached, tapered limbs and a smooth body, which reads far closer to the subject. Keep it as one connected body; edit by name (Base_Humanoid).
@@ -402,6 +487,7 @@ export function blenderToolRegistry(config: JarvGenieConfig): ToolRegistry {
     ...webTools(),
     bpyExecTool(config),
     bpyBaseMeshTool(config),
+    bpyPolyHavenTool(config),
     bpyReferenceTool(config),
     bpyRenderReportTool(config),
   ];
