@@ -10,7 +10,7 @@ import { describeToSpec, extractAbsoluteImagePath } from './reference.js';
 import { BASE_HUMANOID_SNIPPET } from './basemesh.js';
 import { searchPolyHavenAssets, resolvePolyHavenFile, downloadPolyHavenFile } from './polyhaven.js';
 import { craftReady, runCraft, craftGlbPath } from './craft.js';
-import { loadBlenderSnapshot, renderBlenderSnapshot, saveBlenderSnapshot } from './state.js';
+import { loadBlenderSnapshot, renderBlenderSnapshot, saveBlenderSnapshot, loadProjectNotes, renderProjectContext, recordProjectNote } from './state.js';
 
 /**
  * Dedicated RAM-light Blender runner.
@@ -307,21 +307,34 @@ function bpyImportCraftTool(config: JarvGenieConfig): ToolDefinition {
     name: 'bpy_import_craft',
     system: 'sense',
     description:
-      'Import the crafted mesh GLB (/tmp/jarv_crafted.glb — produced by bpy_craft) into the LIVE scene, cleaning it up: removes the default "Cube"/"Plane" that would otherwise intersect and make the figure look like a cut-out embedded in a base plane, and applies a base color material (default green orc-skin; pass material="brown"/"red"/etc for other). Use AFTER bpy_craft, when Blender is open. Then add it to the current build and refine it (skin, armor, features).',
+      'Import the crafted mesh GLB (/tmp/jarv_crafted.glb — produced by bpy_craft) into the LIVE scene, cleaning it up: removes the default "Cube"/"Plane" that would otherwise intersect, strips the fused "breakaway-tray" base, and smooth-shades. Does NOT impose a color unless you pass one, so each character keeps its true/reference appearance. Optionally pass material="green"/"brown"/"red"/"gray" to pre-color for a known character. Use AFTER bpy_craft, when Blender is open; then color/texture/refine per the character.',
     inputSchema: {
       type: 'object',
       properties: {
-        material: { type: 'string', description: 'Base color word for the crafted mesh (default "green" for orc skin): green, brown, red, gray, white.' },
+        material: { type: 'string', description: 'Optional base color to apply: green, brown, red, gray, white. Omit to keep the mesh as-is (no imposed color).' },
       },
     },
     handler: async (args) => {
-      const matWord = String(args.material ?? 'green').trim().toLowerCase() || 'green';
+      const matWord = String(args.material ?? '').trim().toLowerCase();
       const colorMap: Record<string, [number, number, number]> = {
         green: [0.12, 0.45, 0.18], red: [0.6, 0.1, 0.1], brown: [0.4, 0.28, 0.16],
         gray: [0.55, 0.55, 0.55], white: [0.9, 0.9, 0.9], black: [0.08, 0.08, 0.08],
       };
-      const rgb = colorMap[matWord] ?? colorMap.green!;
-      const color = `${rgb[0]},${rgb[1]},${rgb[2]}`;
+      const rgb = colorMap[matWord]; // undefined => no imposed color
+      const colorBake =
+        rgb
+          ? [
+              `        mat=bpy.data.materials.get('MAT_Crafted') or bpy.data.materials.new(name='MAT_Crafted')`,
+              `        mat.use_nodes=True`,
+              `        b=mat.node_tree.nodes.get('Principled BSDF')`,
+              `        b.inputs['Base Color'].default_value=(${rgb[0]},${rgb[1]},${rgb[2]},1.0)`,
+              `        b.inputs['Roughness'].default_value=0.7`,
+              `        if len(mesh.data.materials)==0:`,
+              `            mesh.data.materials.append(mat)`,
+              `        else:`,
+              `            mesh.data.materials[0]=mat`,
+            ].join('\n')
+          : `        # (no color imposed — keep the figure as-is; texture/color per character)`;
       const glb = '/tmp/jarv_crafted.glb';
       const code = [
         'import bpy, os',
@@ -362,15 +375,7 @@ function bpyImportCraftTool(config: JarvGenieConfig): ToolDefinition {
         `            bm.to_mesh(mesh.data); bm.free(); mesh.data.update()`,
         `        except Exception:`,
         `            pass`,
-        `        mat=bpy.data.materials.get('MAT_Crafted') or bpy.data.materials.new(name='MAT_Crafted')`,
-        `        mat.use_nodes=True`,
-        `        b=mat.node_tree.nodes.get('Principled BSDF')`,
-        `        b.inputs['Base Color'].default_value=(${color},1.0)`,
-        `        b.inputs['Roughness'].default_value=0.7`,
-        `        if len(mesh.data.materials)==0:`,
-        `            mesh.data.materials.append(mat)`,
-        `        else:`,
-        `            mesh.data.materials[0]=mat`,
+        colorBake,
         `        bpy.ops.object.select_all(action='DESELECT'); mesh.select_set(True); bpy.context.view_layer.objects.active=mesh`,
         `        bpy.ops.object.shade_smooth()`,
         `        print('IMPORTED', mesh.name, len(mesh.data.vertices))`,
@@ -380,7 +385,7 @@ function bpyImportCraftTool(config: JarvGenieConfig): ToolDefinition {
       return {
         ok: true,
         mode: r.mode,
-        note: `Imported crafted mesh as "Crafted" (${matWord} skin), removed the default Cube/Plane so it isn't embedded, smooth-shaded. Now refine it (add snout/tusks/armor, or fit the reference).`,
+        note: `Imported crafted mesh as "Crafted", removed the default Cube/Plane + stripped the breakaway tray + smooth-shaded${rgb ? ` and applied ${matWord} material` : ' (no color imposed — color/texture per the character)'}. Now refine it.`,
       };
     },
   };
@@ -714,11 +719,15 @@ export async function runBlenderTask(config: JarvGenieConfig, input: BlenderRunI
   // "remembers" the current build and refines it by name (isolated to the runner).
   const snapshot = await loadBlenderSnapshot();
   const snapshotHint = renderBlenderSnapshot(snapshot);
+  // Inject the Blender "self-learning" log: models already built in past projects,
+  // so Jarv builds each NEW character true to its own source (not a past shape).
+  const projectNotes = await loadProjectNotes();
+  const projectHint = renderProjectContext(projectNotes);
   // Deterministically read any reference image named in the prompt into a
   // shape-spec hint, so the text model is never expected to decode an image it
   // can't see (DeepSeek rejects image input with "does not support image input").
   const referenceHint = await referenceHintFor(config, input.message);
-  const userMessage = [input.message, referenceHint, snapshotHint].filter(Boolean).join('\n');
+  const userMessage = [input.message, referenceHint, snapshotHint, projectHint].filter(Boolean).join('\n');
   const messages: ChatMessage[] = [
     { role: 'system', content: BLENDER_SYSTEM(today) },
     { role: 'user', content: userMessage },
@@ -760,7 +769,17 @@ export async function runBlenderTask(config: JarvGenieConfig, input: BlenderRunI
     const textCalls = chat.toolCalls ?? extractTextToolCalls(chat.content ?? '', toolNames).map((e, i) => ({ id: `text-${i}`, name: e.name, arguments: e.args }));
     const calls: ToolCall[] = Array.isArray(chat.toolCalls) ? chat.toolCalls : textCalls;
     if (calls.length === 0) {
-      // Final answer.
+      // Final answer — record a short "what was built" note in the isolated
+      // self-learning log so a FUTURE prompt knows this model exists (and to build
+      // new characters fresh, not reuse it). Best-effort.
+      const ref = extractAbsoluteImagePath(input.message);
+      void recordProjectNote({
+        prompt: input.message,
+        reference: ref ?? undefined,
+        objectName: snapshot?.parts.map((p) => p.name).join(', ').slice(0, 120) || undefined,
+        verts: undefined,
+        outcome: 'built/refined',
+      });
       return { text: chat.content ?? '', steps, toolCalls, provider, model, local: usedLocal };
     }
 

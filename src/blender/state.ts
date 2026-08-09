@@ -91,3 +91,104 @@ export function renderBlenderSnapshot(snap: BlenderSnapshot | null): string {
     .map((p) => `${p.name} (${p.type}${p.parent ? ` child-of ${p.parent}` : ''})`);
   return `\nYou are CONTINUING work on this existing Blender build. Current named objects in the scene:\n${lines.join('\n')}\nREFINE these by name; never delete/recreate them. Only clear when the user explicitly says start over.`;
 }
+
+// ---------------------------------------------------------------------------
+// Blender "self-learning" log (isolated, per-project, RAM-light)
+//
+// A durable note of what 3D objects/characters Jarv has already built and *how*
+// (reference + what worked). Kept in ~/.jarv-genie/blender/projects.json — the
+// SAME isolation boundary as the snapshot/spec-cache — so it NEVER bleeds into
+// Jarv's general memory/reviews/agent. Its only consumer is the Blender runner.
+// This lets Jarv recall prior models so it (a) doesn't recreate a past character
+// verbatim and (b) carries forward "what worked" for better renders.
+// ---------------------------------------------------------------------------
+
+export interface BlenderProjectNote {
+  key: string;            // stable id (hash of prompt+reference, or prompt slug)
+  prompt: string;         // the original build/craft prompt (truncated)
+  reference?: string;     // reference image path if any
+  objectName?: string;    // the object/mesh produced
+  verts?: number;         // mesh size
+  outcome?: string;       // short "what worked / what didn't"
+  createdAt: string;
+  updatedAt: string;
+  crafts: number;         // how many times this project was produced
+}
+
+const PROJECTS_FILE = 'projects.json';
+
+function projectsFile(): string {
+  return path.join(snapshotDir(), PROJECTS_FILE);
+}
+
+function stabilityKey(prompt: string, reference?: string): string {
+  const src = `${(prompt || '').trim().toLowerCase().slice(0, 80)}|${reference ?? ''}`;
+  let h = 0;
+  for (let i = 0; i < src.length; i++) h = (h * 31 + src.charCodeAt(i)) | 0;
+  return 'p' + (h >>> 0).toString(16);
+}
+
+export async function loadProjectNotes(): Promise<BlenderProjectNote[]> {
+  try {
+    const raw = await fs.readFile(projectsFile(), 'utf8');
+    const arr = JSON.parse(raw) as BlenderProjectNote[];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Record/refresh a project note (upsert by stable key). Best-effort, never throws. */
+export async function recordProjectNote(note: {
+  prompt: string;
+  reference?: string;
+  objectName?: string;
+  verts?: number;
+  outcome?: string;
+}): Promise<void> {
+  try {
+    const key = stabilityKey(note.prompt, note.reference);
+    const notes = await loadProjectNotes();
+    const now = new Date().toISOString();
+    const existing = notes.find((n) => n.key === key);
+    if (existing) {
+      existing.updatedAt = now;
+      existing.crafts += 1;
+      if (note.outcome) existing.outcome = note.outcome;
+      if (note.objectName) existing.objectName = note.objectName;
+      if (note.verts) existing.verts = note.verts;
+    } else {
+      notes.push({
+        key,
+        prompt: note.prompt.slice(0, 200),
+        reference: note.reference,
+        objectName: note.objectName,
+        verts: note.verts,
+        outcome: note.outcome,
+        createdAt: now,
+        updatedAt: now,
+        crafts: 1,
+      });
+    }
+    // Cap the log so it stays tiny (~50 projects).
+    const capped = notes.slice(-50);
+    await fs.mkdir(snapshotDir(), { recursive: true });
+    await fs.writeFile(projectsFile(), JSON.stringify(capped, null, 2) + '\n', 'utf8');
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** A short hint telling Jarv what it has already built (to avoid verbatim reuse and
+ *  to carry forward lessons). Empty when no prior projects are recorded. */
+export function renderProjectContext(notes: BlenderProjectNote[]): string {
+  if (!notes || notes.length === 0) return '';
+  const lines = notes
+    .slice(-8)
+    .map((n) => `- "${n.prompt.slice(0, 60)}"${n.objectName ? ` -> ${n.objectName}` : ''}${n.reference ? ` (ref: ${n.reference})` : ''}${n.outcome ? ` [${n.outcome}]` : ''}`)
+    .join('\n');
+  return (
+    `\n[Blender learning log — models you have ALREADY built across past projects]\n${lines}\n` +
+    `If THIS request is a NEW character/model, build it fresh for THIS reference and do NOT reuse/re-arrange a past shape. If it's the SAME project, refine its existing object by name. This keeps each new character true to its own source rather than recreating an earlier one.`
+  );
+}

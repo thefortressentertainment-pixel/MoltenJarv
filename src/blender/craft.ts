@@ -135,12 +135,12 @@ export async function runCraft(
     // Post-process the raw mesh GLB: strip the fused breakaway-tray base and apply
     // a green base material, so the output is a clean, colored figure regardless of
     // how it is later imported (manual File>Import or bpy_import_craft).
-    const cleaned = await cleanCraftedGlb(out);
+    const cleaned = await cleanCraftedGlb(out, null);
     if (!cleaned.ok) {
       // On cleanup failure, fall back to the raw mesh (don't silently drop the craft).
       return { ok: true, glb: out, note: 'craft done but cleanup skipped: ' + (cleaned.error ?? ''), durationMs: Date.now() - start };
     }
-    return { ok: true, glb: out, note: 'craft done; tray removed + green base color applied', durationMs: Date.now() - start };
+    return { ok: true, glb: out, note: 'craft done; breakaway tray removed (no color imposed — texture/color per character later)', durationMs: Date.now() - start };
   } catch (err) {
     const e = err as { stdout?: string; stderr?: string; killed?: boolean };
     return {
@@ -153,9 +153,14 @@ export async function runCraft(
 }
 
 /** Clean the raw crafted mesh GLB in place: strip the fused flat "breakaway tray"
- *  base disc and apply a green base material, via a short headless Blender pass.
- *  RAM-light (spawn-and-exit; Blender must NOT be open). Returns ok + the GLB. */
-export async function cleanCraftedGlb(glb: string = craftGlbPath()): Promise<{ ok: boolean; error?: string }> {
+ *  base disc, via a short headless Blender pass. Optionally applies a base color
+ *  ONLY if one is explicitly requested (default: no color baked in — the figure
+ *  keeps its own appearance and is textured/colored per character later). RAM-light
+ *  (spawn-and-exit; Blender must NOT be open). Returns ok + the GLB. */
+export async function cleanCraftedGlb(
+  glb: string = craftGlbPath(),
+  color: [number, number, number] | null = null,
+): Promise<{ ok: boolean; error?: string }> {
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
   const fs = await import('node:fs');
@@ -164,6 +169,13 @@ export async function cleanCraftedGlb(glb: string = craftGlbPath()): Promise<{ o
     return { ok: false, error: 'Blender not found for GLB cleanup' };
   }
   blenderBin = '/Applications/Blender.app/Contents/MacOS/Blender';
+  const colorBake = color
+    ? `mat=bpy.data.materials.new('MAT_Crafted'); mat.use_nodes=True
+b=mat.node_tree.nodes.get('Principled BSDF'); b.inputs['Base Color'].default_value=(${color[0]},${color[1]},${color[2]},1.0)
+if len(mesh.data.materials)==0: mesh.data.materials.append(mat)
+else: mesh.data.materials[0]=mat
+`
+    : '';
   const script = `import bpy, os, bmesh, math, collections
 bpy.ops.wm.read_factory_settings(use_empty=True)
 glb=${JSON.stringify(glb)}
@@ -185,11 +197,7 @@ _cut=_tt+0.04
 bm=bmesh.new(); bm.from_mesh(mesh.data)
 bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.z<_cut], context='VERTS')
 bm.to_mesh(mesh.data); bm.free(); mesh.data.update()
-mat=bpy.data.materials.new('MAT_Crafted'); mat.use_nodes=True
-b=mat.node_tree.nodes.get('Principled BSDF'); b.inputs['Base Color'].default_value=(0.12,0.45,0.18,1.0)
-if len(mesh.data.materials)==0: mesh.data.materials.append(mat)
-else: mesh.data.materials[0]=mat
-bpy.ops.object.select_all(action='SELECT')
+${colorBake}bpy.ops.object.select_all(action='SELECT')
 bpy.ops.export_scene.gltf(filepath=glb, use_selection=False, export_format='GLB')
 print('CLEAN_OK', len(mesh.data.vertices))
 `;
