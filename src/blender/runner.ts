@@ -336,9 +336,36 @@ export async function runBlenderTask(config: JarvGenieConfig, input: BlenderRunI
   return { text: `Reached the ${maxSteps}-step budget for this Blender task; background work may continue. For more, split the request.`, steps, toolCalls, provider, model, local: usedLocal };
 }
 
+/** Export the LIVE Blender scene to a GLB for the web UI viewer. Sends a bpy
+ *  snippet through the bridge and verifies the file was written. RAM-light (the
+ *  export runs in the already-open Blender). */
+export async function runBlenderExport(): Promise<{ ok: boolean; path: string; error?: string; detail?: string }> {
+  const outPath = '/tmp/jarv_blender_preview.glb';
+  const code = [
+    `import bpy, os, json`,
+    `target = '${outPath}'`,
+    `# deselect all, then export the whole scene as GLB`,
+    `bpy.ops.object.select_all(action='SELECT')`,
+    `# selection-based GLB export needs at least one selected object; ensure one`,
+    `if len(bpy.context.selected_objects) == 0 and bpy.data.objects:`,
+    `    bpy.data.objects[0].select_set(True)`,
+    `bpy.ops.export_scene.gltf(filepath=target, export_format='GLB', use_selection=False)`,
+    `print('EXPORTED', target, os.path.getsize(target))`,
+  ].join('\n');
+  try {
+    const r = await runLiveBpy(code);
+    if (!r.ok) return { ok: false, path: outPath, error: r.mode === 'no-blender' ? 'no live Blender open' : 'export bpy error', detail: JSON.stringify(r.result).slice(0, 300) };
+    const fs = await import('node:fs');
+    const exists = fs.existsSync(outPath) && fs.statSync(outPath).size > 0;
+    if (!exists) return { ok: false, path: outPath, error: 'GLB file not produced', detail: 'export ran but no file at /tmp/jarv_blender_preview.glb' };
+    return { ok: true, path: outPath };
+  } catch (err) {
+    return { ok: false, path: outPath, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 /** One-shot convenience for tests: run with a stubbed producer already wired. */
-export async function runBlenderShell(config: JarvGenieConfig, script: string): Promise<{ ok: boolean; output: string }> {
-  const { execFile } = await import('node:child_process');
+export async function runBlenderShell(config: JarvGenieConfig, script: string): Promise<{ ok: boolean; output: string }> {  const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
   const fs = await import('node:fs');
   const execFileAsync = promisify(execFile);

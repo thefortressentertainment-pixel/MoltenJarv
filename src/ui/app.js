@@ -712,4 +712,12 @@ function runDeepLinkTask() {
   send();
 }
 
+// Open the in-browser 3D preview of Jarv's Blender work.
+const viewerBtn = document.getElementById('viewerBtn');
+if (viewerBtn) {
+  viewerBtn.addEventListener('click', () => {
+    if (window.JarvViewer) window.JarvViewer.open();
+  });
+}
+
 init();

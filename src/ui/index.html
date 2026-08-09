@@ -16,6 +16,7 @@
       </div>
     </div>
     <div class="top-actions">
+      <button id="viewerBtn" class="btn ghost" title="Open the in-browser 3D preview of Jarv's Blender work">3D</button>
       <button id="newBtn" class="btn ghost" title="Start a new conversation">New</button>
       <button id="menuBtn" class="btn ghost" title="Settings and details">Details</button>
     </div>
@@ -34,6 +35,19 @@
       <div class="chips" id="chips"></div>
     </div>
   </main>
+
+  <section id="viewer" class="viewer hidden" aria-label="3D preview of Jarv's Blender work">
+    <div class="viewer-head">
+      <span class="viewer-title">Blender 3D preview</span>
+      <div class="viewer-actions">
+        <button id="viewerExportBtn" class="btn ghost small" title="Ask Jarv to export the current Blender scene to a GLB">Export from Blender</button>
+        <button id="viewerClose" class="btn ghost small" title="Close">Close</button>
+      </div>
+    </div>
+    <div class="viewer-canvas-wrap">
+      <canvas id="viewerCanvas"></canvas>
+    </div>
+  </section>
 
   <footer class="composer">
     <button id="micBtn" class="btn mic" title="Talk to Jarv Genie — click to start, it stops when you pause">
@@ -90,5 +104,6 @@
   </aside>
 
   <script src="/app.js"></script>
+  <script type="module" src="/viewer.js"></script>
 </body>
 </html>

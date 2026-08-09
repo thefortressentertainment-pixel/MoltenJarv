@@ -17,7 +17,7 @@ import { speakToWav, transcribe } from '../voice/index.js';
 import { artifactPath, checkUpdateStatus, readManifest } from '../updates/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ASSETS = new Set(['index.html', 'app.css', 'app.js']);
+const ASSETS = new Set(['index.html', 'app.css', 'app.js', 'viewer.js']);
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '::ffff:127.0.0.1']);
 const VALID_INITIATIVE_STATUSES: InitiativeStatus[] = ['proposed', 'approved', 'declined', 'in_progress', 'done'];
 
@@ -103,6 +103,24 @@ function handler(ctx: AgentContext, opts: UiServerOptions, host: string) {
         const name = route.slice(1);
         const type = name.endsWith('.css') ? 'text/css' : name.endsWith('.js') ? 'text/javascript' : 'text/plain';
         return await sendFile(res, name, type);
+      }
+      // Vendored three.js + GLTFLoader for the in-browser 3D viewer (ESM, no bundler).
+      if (req.method === 'GET' && route.startsWith('/vendor/three/')) {
+        const name = route.slice('/vendor/three/'.length);
+        return await sendFile(res, `vendor/three/${name}`, 'text/javascript');
+      }
+      // Serve the exported GLB preview of Jarv's Blender scene (produced by
+      // /api/blender/export) for the three.js viewer.
+      if (req.method === 'GET' && route === '/preview.glb') {
+        try {
+          const buf = await fs.readFile('/tmp/jarv_blender_preview.glb');
+          res.writeHead(200, { 'Content-Type': 'model/gltf-binary', 'Content-Length': buf.length });
+          res.end(buf);
+        } catch {
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
+          res.end('no exported preview — ask Jarv to build in Blender, then export');
+        }
+        return;
       }
 
       if (!route.startsWith('/api/')) {
@@ -250,6 +268,22 @@ function handler(ctx: AgentContext, opts: UiServerOptions, host: string) {
           const { runBlenderTask } = await import('../blender/runner.js');
           const result = await runBlenderTask(ctx.config, { message, model: body.model ? String(body.model) : undefined });
           return json(res, 200, result);
+        } catch (err) {
+          return json(res, 502, { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
+      // Export the live Blender scene to a GLB so the web UI's three.js viewer can
+      // show Jarv's work without opening Blender. Runs the export inside the live
+      // open scene via the add-on bridge.
+      if (req.method === 'POST' && route === '/api/blender/export') {
+        try {
+          const { runBlenderExport, liveBridgeState } = await import('../blender/runner.js');
+          const state = await liveBridgeState();
+          if (!state?.live) return json(res, 409, { error: 'no live Blender bridge — open Blender with the Jarv add-on to export' });
+          const out = await runBlenderExport();
+          if (!out.ok) return json(res, 502, { error: out.error ?? 'export failed', detail: out.detail });
+          return json(res, 200, { ok: true, path: out.path, note: 'open /preview.glb in the hub UI to view' });
         } catch (err) {
           return json(res, 502, { error: err instanceof Error ? err.message : String(err) });
         }
