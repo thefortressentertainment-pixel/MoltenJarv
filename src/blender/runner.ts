@@ -134,10 +134,12 @@ CRITICAL — visual/spatial discipline:
 
 GENERAL:
 - REFERENCE IMAGE IS OPTIONAL, NOT REQUIRED. You do NOT need an image to build. By default, build from your OWN knowledge + the user's free-text description (e.g. "a sturdy pine workbench, thick top, 4 legs"). Use bpy_reference ONLY when the user explicitly gives an absolute image path (e.g. "/Users/.../wreath.jpg") or says "make it look like this picture" — then call it FIRST to extract proportions, then build with bpy_exec.
+- MATERIALS & SHADING: When the description names a color or material (pine, oak, red, metal, glass), ALWAYS create and assign a matching material via the bpy-material pattern (Principled BSDF). Even if not named, default to shading the finished model with a reasonable material + a light (SUN/AREA) so the result is not a flat gray primitive. A wood item = brown Principled with roughness ~0.6; name it MAT_Wood.
+- REAL 3D, not flat: a "leg"/"column"/"handle"/"stem" is a 3D body (cylinder/rounded column), NOT a flat plane. A bench leg is a squat cylinder or beveled box — never a 2D rectangle. Give parts thickness and proper X/Y/Z scale.
 - You already know what common things look like (wreath, dog, chair, table). Use that + the description; do not stall waiting for an image.
 - Prefer low-level bpy (bpy.data.objects, matrix assignment) over bpy.ops when context is flaky.
 - Use bpy_exec for scene edits; file/run_shell only if a task truly needs a script file or external asset.
-- Stay on the ONE request. Reply concisely with the object names created and the AABB/pose verification.
+- Stay on the ONE request. Reply concisely with the object names + materials created and the AABB/pose verification.
 Today is ${today}.`;
 
 export async function newBlenderRouter(config: JarvGenieConfig, forceLocal = false): Promise<ModelRouter> {
