@@ -60,7 +60,10 @@ export async function runLiveBpy(code: string): Promise<{ ok: boolean; result: u
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code }),
-        signal: AbortSignal.timeout(60_000),
+        // Short timeout so a bridge whose main-thread timer isn't firing (e.g.
+        // Blender in --background, or a wedged session) can't hang the runner for
+        // the full 60s the add-on handler would otherwise block.
+        signal: AbortSignal.timeout(15_000),
       });
       const data = (await res.json().catch(() => ({ ok: false, error: `http ${res.status}` }))) as { ok?: boolean; error?: string };
       return { ok: data.ok === true, result: data, mode: 'live' };
@@ -81,7 +84,7 @@ function bpyExecTool(config: JarvGenieConfig): ToolDefinition {
     name: 'bpy_exec',
     system: 'sense',
     description:
-      'Execute a bpy Python snippet in the LIVE Blender scene and return the new scene object list. Use this to create/place/modify objects the user can SEE, e.g. bpy.ops.mesh.primitive_cube_add(size=1, location=(0,0,0)). If Blender is not open, it reports that instead of doing invisible headless work.',
+      'Execute a bpy Python snippet in the LIVE Blender scene and return the new scene object list + AABB/positions. Build visually coherent models: put the WHOLE silhouette in one snippet, REUSE existed named objects (do not spawn disconnected duplicates), and PARENT parts so nothing ends up loose/dissected. Return the object list so you can verify counts and connectivity.',
     inputSchema: {
       type: 'object',
       properties: { code: { type: 'string', description: 'A bpy Python snippet (safe, no file writes).' } },
@@ -117,13 +120,20 @@ export interface BlenderRunResult {
 }
 
 const BLENDER_SYSTEM = (today: string): string =>
-  `You are Jarv, working ONLY on a Blender task in the user's OPEN Blender scene. Memory/CPU are limited; be terse and efficient.
-Rules:
-- USE bpy_exec to run bpy snippets DIRECTLY in the open scene so the user SEES the result (e.g. bpy.ops.mesh.primitive_cube_add(size=1, location=(0,0,0))). DO NOT spend steps introspecting — just write correct bpy and run it, then read the returned object list.
-- Keep snippets short and correct. After running, confirm what was added. Multiple objects? Run them in ONE bpy_exec (create several objects in a single snippet).
-- If bpy_exec says Blender isn't open, tell the user Blender must be open to see the change.
-- Use file_write/run_shell only if a task truly needs a script file; prefer bpy_exec for scene edits.
-- Stay on the ONE Blender task. Reply concisely with what was done.
+  `You are Jarv, building 3D models in the user's OPEN Blender scene. Memory/CPU are limited; be terse but build visually coherent, recognizable objects — not symbolic placeholders.
+
+CRITICAL — visual/spatial discipline:
+- A "wreath" is a circular arrangement of overlapping branches/leaves, not a plain doughnut + cones. A "running dog" is a quadruped with 4 legs in a RUNNING pose, one body, one head, proportioned — NOT detached separate primitives.
+- ESTABLISH A BASELINE first: clear the scene, choose a scale/pivot, then build the whole silhouette as ONE coherent object (or a few named, PARENTED parts) before adding detail.
+- REUSE NAMED objects: to modify/skew/rotate a limb, reference the SAME object by name (bpy.data.objects["Name"]) and apply the transform to THAT object — never spawn a fresh disconnected primitive per step.
+- Do the whole edit in ONE bpy_exec: create, shape, place, parent, apply (do not split one logical step across many calls that each assume a fresh scene).
+- VERIFY at the end: call verify/AABB or read the returned object list and CONFIRM counts/positions make sense (e.g. 4 legs, not 8; parts still connected/parented — nothing "dissected" into loose pieces).
+- Animation: to animate a running dog across 10 frames, rotate the same shoulder/hip bones or the LEG objects' rotation over time on one armature — do NOT create new armatures or pull existing ones apart. Set keyframes with bpy.context.scene.frame_set(f) + object.keyframe_insert(...).
+
+GENERAL:
+- Prefer low-level bpy (bpy.data.objects, matrix assignment) over bpy.ops when context is flaky.
+- Use bpy_exec for scene edits; file/run_shell only if a task truly needs a script file or external asset.
+- Stay on the ONE request. Reply concisely with the object names created and the AABB/pose verification.
 Today is ${today}.`;
 
 export async function newBlenderRouter(config: JarvGenieConfig, forceLocal = false): Promise<ModelRouter> {
