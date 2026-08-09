@@ -49,23 +49,20 @@ try {
 const out = '/tmp/jarv_crafted.glb';
 try { fs.unlinkSync(out); } catch {}
 
-// Free-RAM pre-flight so we never swap-thrash the machine.
-let freeMB = Infinity;
+// Free-RAM pre-flight via macOS's authoritative memory_pressure free percentage.
+// (vm_stat "Pages free" undercounts — macOS keeps most RAM as reclaimable cache.)
+let freePct = Infinity;
 try {
-  const totalMB = Number(execFileSync('sysctl', ['-n', 'hw.memsize'], { encoding: 'utf8' }).trim()) / 1048576;
-  const vmStr = execFileSync('vm_stat', [], { encoding: 'utf8' });
-  const pm = /Pages free:\s+(\d+)/.exec(vmStr);
-  if (pm) {
-    const freePages = Number(pm[1]);
-    freeMB = Math.max(0, Math.round((freePages * 4096) / 1048576));
-  }
+  const mp = execFileSync('memory_pressure', [], { encoding: 'utf8' });
+  const pm = /System-wide memory free percentage:\s+(\d+)%/.exec(mp);
+  if (pm) freePct = Number(pm[1]);
 } catch {}
-if (freeMB !== Infinity && freeMB < 2500) {
-  console.error(`[craft] Only ~${(freeMB / 1024).toFixed(1)}GB free RAM; a Q4 craft needs ~2.5GB+. Close Docker Desktop / large VMs / editors and retry.`);
+if (freePct !== Infinity && freePct < 25) {
+  console.error(`[craft] RAM is tight (~${freePct}% memory free). Close Docker Desktop / large VMs / editors and retry.`);
   process.exit(3);
 }
 
-console.log(`[craft] hy3d shape image=${image} quantize=${quantize} octree=${octree} steps=${steps} (free≈${Math.round(freeMB / 1024)}GB)`);
+console.log(`[craft] hy3d shape image=${image} quantize=${quantize} octree=${octree} steps=${steps} (memory free ≈${freePct === Infinity ? 'n/a' : freePct}%)`);
 console.log('[craft] this is a multi-GB Metal compute — please be patient (30s-few min).');
 const started = Date.now();
 promisify(execFile)(bin, ['shape', image, '-o', out, '--weights', weights, '--quantize', String(quantize), '--octree', String(octree), '--steps', String(steps)],

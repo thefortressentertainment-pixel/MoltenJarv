@@ -46,18 +46,19 @@ export async function craftReady(): Promise<boolean> {
   }
 }
 
-/** Current free (inactive) memory in MB, best-effort on macOS. Used to refuse a
- *  craft before it thrashes the machine. Returns null if it can't be read. */
-export async function freeMemMB(): Promise<number | null> {
+/** Current system-wide memory pressure as a FREE PERCENTAGE (0-100), using macOS's
+ *  authoritative `memory_pressure` tool — NOT `vm_stat`'s "Pages free", which reads
+ *  a tiny cached-window number and badly undercounts RAM that macOS can reclaim.
+ *  Returns null if it can't be read. Used to refuse a craft only when truly tight. */
+export async function freeMemPct(): Promise<number | null> {
   try {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
-    const out = await promisify(execFile)('sysctl', ['-n', 'hw.memsize'], { timeout: 5000 });
-    const total = Number(out.stdout.trim()) || 0;
-    const vm = await promisify(execFile)('vm_stat', [], { timeout: 5000 });
-    const m = /Pages free:\s+(\d+)/.exec(vm.stdout);
-    if (!total || !m) return null;
-    return Math.round((Number(m[1]) * 4096) / 1048576); // pages*4KiB -> MB
+    const out = await promisify(execFile)('memory_pressure', [], { timeout: 5000 });
+    const m = /System-wide memory free percentage:\s+(\d+)%/.exec(out.stdout);
+    if (!m) return null;
+    const pct = Number(m[1]);
+    return Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : null;
   } catch {
     return null;
   }
@@ -90,12 +91,15 @@ export async function runCraft(
   if (!fs.existsSync(path.join(weights, 'model.fp16.safetensors'))) return { ok: false, error: 'hy3d shape weights missing' };
 
   // RAM guard: a Q4 shape craft needs a few GB of headroom. Refuse BEFORE spawning
-  // so we never swap-thrash / freeze the 8GB machine (Docker/GPU VMs excluded).
-  const free = await freeMemMB();
-  if (free !== null && free < 2500) {
+  // RAM guard via macOS's authoritative memory_pressure free PERCENTAGE. Only
+  // refuse when the machine is genuinely tight (< ~25% free => less than ~2GB
+  // reclaimable on 8GB). The old vm_stat "Pages free" read near-zero even on an
+  // otherwise-idle machine, wrongly blocking crafts that had plenty of headroom.
+  const free = await freeMemPct();
+  if (free !== null && free < 25) {
     return {
       ok: false,
-      error: `Not enough free RAM to craft (only ~${(free / 1024).toFixed(1)}GB free; a Q4 shape craft needs ~2.5GB+). Close memory-heavy apps (Docker Desktop, large VMs/editors) so this machine is quiet, then retry.`,
+      error: `RAM is tight (~${free}% memory free). Close memory-heavy apps (Docker Desktop, large VMs/editors) so this machine is quiet, then retry.`,
     };
   }
 
