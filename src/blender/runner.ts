@@ -285,7 +285,7 @@ function bpyCraftTool(config: JarvGenieConfig): ToolDefinition {
       } catch { /* ignore */ }
       const ready = await craftReady();
       if (!ready) {
-        return { ok: false, error: 'hy3d craft engine not installed — run the one-time setup (~/.jarv-genie/craft/) first.' };
+        return { ok: false, error: 'hy3d craft engine not installed — needs ~/.jarv-genie/craft/ with the hy3d binary, a colocated mlx.metallib, and weights/shape-small/' };
       }
       const result = await runCraft(imagePath, { quantize: 4, octree: 192, steps: 30 });
       if (!result.ok) return { ok: false, error: result.error ?? 'craft failed', detail: result.detail, durationMs: result.durationMs };

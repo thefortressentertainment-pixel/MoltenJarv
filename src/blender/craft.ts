@@ -36,11 +36,21 @@ export function craftGlbPath(): string {
   return '/tmp/jarv_crafted.glb';
 }
 
-/** True when a real `hy3d` binary + weights are present and ready to craft. */
+/** The colocated Metal kernel library MLX needs. Without it the craft fails with
+ *  "Failed to load the default metallib". It lives next to the hy3d binary. */
+export function craftMetallib(): string {
+  return path.join(craftRoot(), 'mlx.metallib');
+}
+
+/** True when a real `hy3d` binary + colocated metallib + weights are ready. */
 export async function craftReady(): Promise<boolean> {
   try {
     const fs = await import('node:fs');
-    return fs.existsSync(craftBinary()) && fs.existsSync(path.join(craftShapeWeights(), 'model.fp16.safetensors'));
+    return (
+      fs.existsSync(craftBinary()) &&
+      fs.existsSync(craftMetallib()) &&
+      fs.existsSync(path.join(craftShapeWeights(), 'model.fp16.safetensors'))
+    );
   } catch {
     return false;
   }
@@ -88,6 +98,7 @@ export async function runCraft(
   const weights = craftShapeWeights();
   const out = craftGlbPath();
   if (!fs.existsSync(bin)) return { ok: false, error: 'hy3d binary not installed — run the one-time craft setup' };
+  if (!fs.existsSync(craftMetallib())) return { ok: false, error: 'mlx.metallib not colocated with the hy3d binary — the craft needs it beside the binary or MLX fails with "default metallib not found"' };
   if (!fs.existsSync(path.join(weights, 'model.fp16.safetensors'))) return { ok: false, error: 'hy3d shape weights missing' };
 
   // RAM guard: a Q4 shape craft needs a few GB of headroom. Refuse BEFORE spawning

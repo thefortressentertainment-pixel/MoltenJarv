@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import path from 'node:path';
 import { test } from 'node:test';
-import { craftRoot, craftBinary, craftShapeWeights, craftGlbPath } from '../src/blender/craft.js';
+import { craftRoot, craftBinary, craftShapeWeights, craftGlbPath, craftMetallib } from '../src/blender/craft.js';
 
 test('craft paths are isolated under ~/.jarv-genie/craft/', () => {
   const root = craftRoot();
@@ -31,4 +31,9 @@ test('craft is not ready when no binary/weights installed', async () => {
 
 test('craftGlbPath is a stable absolute path', () => {
   assert.ok(path.isAbsolute(craftGlbPath()), 'GLB path absolute');
+});
+
+test('craftMetallib is colocated with the hy3d binary in the craft root', () => {
+  assert.ok(craftMetallib().startsWith(craftRoot()), 'metallib in craft root');
+  assert.strictEqual(path.basename(craftMetallib()), 'mlx.metallib');
 });
