@@ -9,6 +9,7 @@ import type { JarvGenieConfig } from '../config/index.js';
 import { describeToSpec, extractAbsoluteImagePath } from './reference.js';
 import { BASE_HUMANOID_SNIPPET } from './basemesh.js';
 import { searchPolyHavenAssets, resolvePolyHavenFile, downloadPolyHavenFile } from './polyhaven.js';
+import { craftReady, runCraft, craftGlbPath } from './craft.js';
 import { loadBlenderSnapshot, renderBlenderSnapshot, saveBlenderSnapshot } from './state.js';
 
 /**
@@ -38,6 +39,7 @@ const BLENDER_TOOL_NAMES = new Set<string>([
   'bpy_exec',
   'bpy_base_mesh',
   'bpy_polyhaven',
+  'bpy_craft',
   'bpy_reference',
   'bpy_render_report',
   'file_read', 'file_write', 'file_list', 'file_delete',
@@ -241,6 +243,57 @@ function bpyPolyHavenTool(config: JarvGenieConfig): ToolDefinition {
       } catch (err) {
         return { ok: false, error: `polyhaven failed: ${err instanceof Error ? err.message : String(err)}` };
       }
+    },
+  };
+}
+
+/** A bpy_craft tool: run the native MLX Hunyuan3D shape diffuser to turn a
+ *  reference photo into a REAL mesh GLB (not primitives) — the closest thing to
+ *  1:1 on this Apple Silicon M1. RAM-critical: refuses to run while the live
+ *  Blender bridge is up (shape peaks several GB; can't share 8GB with Blender). */
+function bpyCraftTool(config: JarvGenieConfig): ToolDefinition {
+  return {
+    name: 'bpy_craft',
+    system: 'sense',
+    description:
+      'Turn a reference IMAGE into a REAL high-fidelity mesh GLB using the native MLX Hunyuan3D shape diffuser (runs on this Apple Silicon M1). Pass the absolute path to a reference photo. WARNING/RAM: the craft is a heavy GPU/Metal compute (several GB) and MUST run with Blender CLOSED — this tool refuses to run while the live Blender bridge is up. After it finishes it returns a GLB you then load into Blender to texture/refine. This is how to get a true 1:1-ish mesh silhouette (not box primitives) from a photo.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        imagePath: { type: 'string', description: 'Absolute path to the reference image (png/jpg).' },
+      },
+      required: ['imagePath'],
+    },
+    handler: async (args) => {
+      const imagePath = String(args.imagePath ?? '').trim();
+      if (!imagePath) return { ok: false, error: 'imagePath is required' };
+      try {
+        const fs = await import('node:fs');
+        if (!fs.existsSync(imagePath)) return { ok: false, error: `image not found: ${imagePath}` };
+      } catch {
+        return { ok: false, error: 'cannot check image path' };
+      }
+      // RAM guard: refuse if Blender is live (the craft can't share the machine).
+      try {
+        const state = await liveBridgeState();
+        if (state?.live) {
+          return {
+            ok: false,
+            error: 'Cannot craft while Blender is open (RAM). Close Blender, run this again, then reopen Blender to load the crafted GLB.',
+          };
+        }
+      } catch { /* ignore */ }
+      const ready = await craftReady();
+      if (!ready) {
+        return { ok: false, error: 'hy3d craft engine not installed — run the one-time setup (~/.jarv-genie/craft/) first.' };
+      }
+      const result = await runCraft(imagePath, { quantize: 4, octree: 192, steps: 30 });
+      if (!result.ok) return { ok: false, error: result.error ?? 'craft failed', detail: result.detail, durationMs: result.durationMs };
+      return {
+        ok: true,
+        glb: result.glb,
+        note: `Craft done in ${result.durationMs ? Math.round(result.durationMs / 1000) : '?'}s → ${result.glb}. This is a real mesh. Now IMPORT it into Blender (bpy.ops.import_scene.gltf(filepath=...) — reopen Blender first, since it was closed for the craft) then texture/refine it.`,
+      };
     },
   };
 }
@@ -488,6 +541,7 @@ export function blenderToolRegistry(config: JarvGenieConfig): ToolRegistry {
     bpyExecTool(config),
     bpyBaseMeshTool(config),
     bpyPolyHavenTool(config),
+    bpyCraftTool(config),
     bpyReferenceTool(config),
     bpyRenderReportTool(config),
   ];
