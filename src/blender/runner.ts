@@ -31,10 +31,70 @@ import type { JarvGenieConfig } from '../config/index.js';
  *  file read/write saves scripts/results; web finds assets; screen shows output. */
 const BLENDER_TOOL_NAMES = new Set<string>([
   'run_shell',
+  'bpy_exec',
   'file_read', 'file_write', 'file_list', 'file_delete',
   'web_search', 'web_read',
   'screen_capture',
 ]);
+
+/** Read the live Blender bridge state written by the add-on, if Blender is open. */
+export async function liveBridgeState(): Promise<{ live: boolean; port: number } | null> {
+  try {
+    const fs = await import('node:fs/promises');
+    const home = process.env.HOME ?? '/';
+    const raw = await fs.readFile(home + '/.jarv-genie/blender-state.json', 'utf8');
+    const s = JSON.parse(raw) as { live?: boolean; port?: number | null };
+    return { live: s.live === true, port: Number(s.port ?? 3937) };
+  } catch {
+    return null;
+  }
+}
+
+/** Execute bpy code against the LIVE open Blender scene (via the add-on bridge),
+ *  or fall back to headless if no Blender is live. Returns a Jarv-friendly result. */
+export async function runLiveBpy(code: string): Promise<{ ok: boolean; result: unknown; mode: 'live' | 'headless' | 'no-blender' }> {
+  const state = await liveBridgeState();
+  if (state?.live) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${state.port}/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+        signal: AbortSignal.timeout(60_000),
+      });
+      const data = (await res.json().catch(() => ({ ok: false, error: `http ${res.status}` }))) as { ok?: boolean; error?: string };
+      return { ok: data.ok === true, result: data, mode: 'live' };
+    } catch (err) {
+      return { ok: false, result: { error: `live bridge unreachable: ${err instanceof Error ? err.message : String(err)}` }, mode: 'live' };
+    }
+  }
+  // No live Blender → fall back to a headless background run (no visible scene).
+  if (state !== null && !state.live) return { ok: false, result: { error: 'Blender is not open (no live bridge) — headless fallback unavailable for scene edits' }, mode: 'no-blender' };
+  const shell = await runBlenderShell({} as JarvGenieConfig, code);
+  return { ok: shell.ok, result: shell.ok ? JSON.parse(shell.output || '{}') : { error: shell.output }, mode: 'headless' };
+}
+
+/** A bpy_exec tool: executes bpy in the LIVE open scene when Blender is running,
+ *  else reports cleanly that Blender isn't open (rather than doing invisible work). */
+function bpyExecTool(config: JarvGenieConfig): ToolDefinition {
+  return {
+    name: 'bpy_exec',
+    system: 'sense',
+    description:
+      'Execute a bpy Python snippet in the LIVE Blender scene and return the new scene object list. Use this to create/place/modify objects the user can SEE, e.g. bpy.ops.mesh.primitive_cube_add(size=1, location=(0,0,0)). If Blender is not open, it reports that instead of doing invisible headless work.',
+    inputSchema: {
+      type: 'object',
+      properties: { code: { type: 'string', description: 'A bpy Python snippet (safe, no file writes).' } },
+      required: ['code'],
+    },
+    handler: async (args) => {
+      const code = String(args.code ?? '').trim();
+      if (!code) return { ok: false, error: 'code is required' };
+      const r = await runLiveBpy(code);
+      return { ok: r.ok, mode: r.mode, result: r.result };
+    },
+  };
+}
 
 export interface BlenderRunInput {
   message: string;
@@ -57,14 +117,13 @@ export interface BlenderRunResult {
 }
 
 const BLENDER_SYSTEM = (today: string): string =>
-  `You are Jarv, working ONLY on a Blender task. The user is using Blender right now and memory/CPU are limited, so be terse and efficient.
+  `You are Jarv, working ONLY on a Blender task in the user's OPEN Blender scene. Memory/CPU are limited; be terse and efficient.
 Rules:
-- Use run_shell to drive Blender HEADLESS: blender --background --python <script.py> -- <in> <out> <result.json>. Never open the Blender GUI for your own work.
-- Before writing bpy code, introspect the real bpy API signature (Blender versions differ) rather than guessing symbol names.
-- Write bpy scripts with file_write, run them with run_shell, read the JSON result, fix and retry (cap ~5 attempts).
-- Use web_search/web_read only to find an asset or reference if the task needs one; prefer building in bpy when that's lighter.
-- Keep each headless Blender invocation short-lived and bounded (~60-120s). Do not leave processes running.
-- Stay on the ONE Blender task. Do not explore unrelated tools or memory. Reply concisely with what was done and where output is.
+- USE bpy_exec to run bpy snippets DIRECTLY in the open scene so the user SEES the result (e.g. bpy.ops.mesh.primitive_cube_add(size=1, location=(0,0,0))). DO NOT spend steps introspecting — just write correct bpy and run it, then read the returned object list.
+- Keep snippets short and correct. After running, confirm what was added. Multiple objects? Run them in ONE bpy_exec (create several objects in a single snippet).
+- If bpy_exec says Blender isn't open, tell the user Blender must be open to see the change.
+- Use file_write/run_shell only if a task truly needs a script file; prefer bpy_exec for scene edits.
+- Stay on the ONE Blender task. Reply concisely with what was done.
 Today is ${today}.`;
 
 export async function newBlenderRouter(config: JarvGenieConfig, forceLocal = false): Promise<ModelRouter> {
@@ -91,6 +150,7 @@ export function blenderToolRegistry(config: JarvGenieConfig): ToolRegistry {
     ...systemTools(),
     ...fileTools(),
     ...webTools(),
+    bpyExecTool(config),
   ];
   const scoped = all.filter((t) => BLENDER_TOOL_NAMES.has(t.name));
   registry.registerMany(scoped);
@@ -108,7 +168,7 @@ export async function runBlenderTask(config: JarvGenieConfig, input: BlenderRunI
   const registry = blenderToolRegistry(config);
   const tools = registry.list();
   const toolNames = tools.map((t) => t.name);
-  const maxSteps = Math.min(input.maxSteps ?? 8, 16);
+  const maxSteps = Math.min(input.maxSteps ?? 14, 16);
 
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const messages: ChatMessage[] = [
