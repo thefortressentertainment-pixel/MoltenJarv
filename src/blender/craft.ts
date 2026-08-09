@@ -80,6 +80,7 @@ export interface CraftResult {
   error?: string;
   detail?: string;
   durationMs?: number;
+  note?: string;
 }
 
 /**
@@ -131,7 +132,15 @@ export async function runCraft(
     const res = await execFileAsync(bin, args, { timeout: 15 * 60_000, maxBuffer: 8 * 1024 * 1024 });
     const created = fs.existsSync(out) && fs.statSync(out).size > 0;
     if (!created) return { ok: false, error: 'craft ran but produced no GLB', detail: (res.stdout || '').slice(0, 800), durationMs: Date.now() - start };
-    return { ok: true, glb: out, durationMs: Date.now() - start };
+    // Post-process the raw mesh GLB: strip the fused breakaway-tray base and apply
+    // a green base material, so the output is a clean, colored figure regardless of
+    // how it is later imported (manual File>Import or bpy_import_craft).
+    const cleaned = await cleanCraftedGlb(out);
+    if (!cleaned.ok) {
+      // On cleanup failure, fall back to the raw mesh (don't silently drop the craft).
+      return { ok: true, glb: out, note: 'craft done but cleanup skipped: ' + (cleaned.error ?? ''), durationMs: Date.now() - start };
+    }
+    return { ok: true, glb: out, note: 'craft done; tray removed + green base color applied', durationMs: Date.now() - start };
   } catch (err) {
     const e = err as { stdout?: string; stderr?: string; killed?: boolean };
     return {
@@ -140,6 +149,59 @@ export async function runCraft(
       detail: ((e.stdout ?? '') + ' ' + (e.stderr ?? '')).slice(0, 800),
       durationMs: Date.now() - start,
     };
+  }
+}
+
+/** Clean the raw crafted mesh GLB in place: strip the fused flat "breakaway tray"
+ *  base disc and apply a green base material, via a short headless Blender pass.
+ *  RAM-light (spawn-and-exit; Blender must NOT be open). Returns ok + the GLB. */
+export async function cleanCraftedGlb(glb: string = craftGlbPath()): Promise<{ ok: boolean; error?: string }> {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const fs = await import('node:fs');
+  let blenderBin = 'blender';
+  if (!fs.existsSync('/Applications/Blender.app/Contents/MacOS/Blender')) {
+    return { ok: false, error: 'Blender not found for GLB cleanup' };
+  }
+  blenderBin = '/Applications/Blender.app/Contents/MacOS/Blender';
+  const script = `import bpy, os, bmesh, math, collections
+bpy.ops.wm.read_factory_settings(use_empty=True)
+glb=${JSON.stringify(glb)}
+bpy.ops.import_scene.gltf(filepath=glb)
+meshes=[o for o in bpy.data.objects if o.type=='MESH']
+if not meshes: raise SystemExit('NO_MESH')
+mesh=meshes[-1]
+bpy.ops.object.select_all(action='DESELECT'); mesh.select_set(True); bpy.context.view_layer.objects.active=mesh
+_verts=[v.co for v in mesh.data.vertices]; _lo=min(v.z for v in _verts)
+_hist=collections.Counter(round(v.z,2) for v in _verts)
+def _wa(z):
+    vs=[v for v in _verts if abs(v.z-z)<0.02]
+    return max((math.hypot(v.x,v.y) for v in vs), default=0.0)
+_tt=_lo
+for z in sorted(_hist):
+    if z-_lo>0.20: break
+    if _wa(z)>0.5: _tt=z
+_cut=_tt+0.04
+bm=bmesh.new(); bm.from_mesh(mesh.data)
+bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.z<_cut], context='VERTS')
+bm.to_mesh(mesh.data); bm.free(); mesh.data.update()
+mat=bpy.data.materials.new('MAT_Crafted'); mat.use_nodes=True
+b=mat.node_tree.nodes.get('Principled BSDF'); b.inputs['Base Color'].default_value=(0.12,0.45,0.18,1.0)
+if len(mesh.data.materials)==0: mesh.data.materials.append(mat)
+else: mesh.data.materials[0]=mat
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.export_scene.gltf(filepath=glb, use_selection=False, export_format='GLB')
+print('CLEAN_OK', len(mesh.data.vertices))
+`;
+  const tmpScript = '/tmp/jarv_clean_glb.py';
+  await fs.promises.writeFile(tmpScript, script, 'utf8');
+  try {
+    await promisify(execFile)(blenderBin, ['--background', '--python', tmpScript], { timeout: 120_000, maxBuffer: 8 * 1024 * 1024 });
+    await fs.promises.unlink(tmpScript).catch(() => {});
+    return { ok: fs.existsSync(glb) && fs.statSync(glb).size > 0 };
+  } catch (err) {
+    await fs.promises.unlink(tmpScript).catch(() => {});
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
