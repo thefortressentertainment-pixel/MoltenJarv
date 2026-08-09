@@ -93,6 +93,12 @@ export function isCommandMessage(text: string): boolean {
   return (text ?? '').trim().startsWith('/');
 }
 
+/** True when the runner returned the "reached the step budget" message, meaning
+ *  the build was cut off mid-work and should be auto-continued. */
+export function isBudgetExhausted(text: string): boolean {
+  return /Reached the \d+-step budget/i.test(text ?? '');
+}
+
 async function handleUpdate(client: TelegramClient, token: string, update: TgUpdate): Promise<void> {
   const chatId = update.message?.chat?.id;
   const msgText = update.message?.text ?? '';
@@ -137,9 +143,37 @@ async function handleUpdate(client: TelegramClient, token: string, update: TgUpd
 
   busy = true;
   try {
-    const maxSteps = /(?:\.(png|jpe?g|jpeg|webp)|make it look like this|reference|photo)/i.test(prompt) ? 24 : 18;
+    const isRef = /(?:\.(png|jpe?g|jpeg|webp)|make it look like this|reference|photo|bpy_craft)/i.test(prompt);
+    const maxSteps = isRef ? 24 : 18;
     await client.sendMessage(chatId, '🧊 Building…').catch(() => {});
-    const { text, steps } = await runBuild(prompt, maxSteps, token);
+
+    // AUTO-CONTINUE: a build that exhausts its step budget is NOT a failure — it
+    // left the work in a refinable state (named parts/snapshot persist). So we
+    // keep prompting the isolated runner to "continue" (each round builds on the
+    // last, sequentially — RAM-safe, only more wall-clock time) until Jarv either
+    // reports a final answer or we hit a sane total cap. This lets a crafts-based
+    // prompt iterate toward 1:1 without the 18-step wall.
+    const MAX_ROUNDS = 6; // up to ~6 * budget steps for a single bot prompt
+    // (more for a 1:1 crafts prompt: send "continue" again to extend farther)
+    let rounds = 0;
+    let message = prompt;
+    let text = '';
+    let steps = 0;
+    let budgetHit = false;
+    do {
+      const r = await runBuild(message, maxSteps, token);
+      text = r.text ?? '';
+      steps += r.steps ?? 0;
+      budgetHit = isBudgetExhausted(text);
+      rounds++;
+      if (budgetHit && rounds < MAX_ROUNDS) {
+        await client.sendMessage(chatId, `⏳ Jarv hit the ${maxSteps}-step budget — continuing (round ${rounds}/${MAX_ROUNDS})...`).catch(() => {});
+        // Continue on the SAME task; the runner injects the persisted named-parts
+        // snapshot so it refines what it already built rather than starting over.
+        message = `Continue the current build and keep improving it toward the request. Refine the parts by name; do NOT restart/clear.`;
+      }
+    } while (budgetHit && rounds < MAX_ROUNDS);
+
     // Render the still and send it (best-effort; if render fails, still send text).
     let rendered = false;
     try {

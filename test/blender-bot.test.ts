@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { buildPrompt, isCommandMessage } from '../src/cli/blenderBot.js';
+import { buildPrompt, isCommandMessage, isBudgetExhausted } from '../src/cli/blenderBot.js';
 
 test('buildPrompt appends a reference path when a photo was attached', () => {
   const p = buildPrompt('build an orc', '/tmp/photo.jpg');
@@ -26,6 +26,13 @@ test('isCommandMessage flags Telegram commands so /start never triggers a build'
   assert.ok(!isCommandMessage('build a green orc'));
   assert.ok(!isCommandMessage(''));
   assert.ok(!isCommandMessage('   '));
+});
+
+test('isBudgetExhausted detects the runner budget-cutoff so the bot auto-continues', () => {
+  assert.ok(isBudgetExhausted('Reached the 18-step budget for this Blender build (18 steps used).'));
+  assert.ok(isBudgetExhausted('Reached the 24-step budget for this Blender build. The in-progress result is exported.'));
+  assert.ok(!isBudgetExhausted('The orc is complete and verified.'));
+  assert.ok(!isBudgetExhausted(''));
 });
 
 test('sendPhoto downscale path is guarded (no real network in tests)', async () => {
