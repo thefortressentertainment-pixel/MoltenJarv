@@ -7,6 +7,7 @@ import { webTools } from '../tools/web.js';
 import { extractTextToolCalls } from '../agent/agent.js';
 import type { JarvGenieConfig } from '../config/index.js';
 import { describeToSpec } from './reference.js';
+import { loadBlenderSnapshot, renderBlenderSnapshot, saveBlenderSnapshot } from './state.js';
 
 /**
  * Dedicated RAM-light Blender runner.
@@ -96,6 +97,14 @@ function bpyExecTool(config: JarvGenieConfig): ToolDefinition {
       const code = String(args.code ?? '').trim();
       if (!code) return { ok: false, error: 'code is required' };
       const r = await runLiveBpy(code);
+      // Persist the named-parts snapshot so a FOLLOW-UP prompt can refine the same
+      // build (isolated to the Blender runner; no bleed into Jarv's memory).
+      if (r.ok && r.mode === 'live' && r.result && typeof r.result === 'object') {
+        const res = r.result as { objects?: Array<{ name: string; type?: string; location?: number[]; bounds?: number[][] }> };
+        if (res.objects) {
+          try { void saveBlenderSnapshot(res.objects); } catch { /* best-effort */ }
+        }
+      }
       return { ok: r.ok, mode: r.mode, result: r.result };
     },
   };
@@ -244,9 +253,14 @@ export async function runBlenderTask(config: JarvGenieConfig, input: BlenderRunI
   const maxSteps = Math.min(input.maxSteps ?? 14, 16);
 
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  // Inject the persisted Blender named-parts snapshot so a follow-up prompt
+  // "remembers" the current build and refines it by name (isolated to the runner).
+  const snapshot = await loadBlenderSnapshot();
+  const snapshotHint = renderBlenderSnapshot(snapshot);
+  const userMessage = snapshotHint ? `${input.message}\n\n${snapshotHint}` : input.message;
   const messages: ChatMessage[] = [
     { role: 'system', content: BLENDER_SYSTEM(today) },
-    { role: 'user', content: input.message },
+    { role: 'user', content: userMessage },
   ];
 
   let steps = 0;
