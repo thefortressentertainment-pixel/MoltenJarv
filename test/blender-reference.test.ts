@@ -53,3 +53,44 @@ test('describeToSpec on a missing image rejects cleanly (runner tool catches it)
     'reads the image file and throws a readable error the runner can catch',
   );
 });
+
+test('describeToSpec serves a cached spec without re-calling vision', async () => {
+  const os = await import('node:os');
+  const pathMod = await import('node:path');
+  const fsMod = await import('node:fs/promises');
+  const dir = await fsMod.mkdtemp(pathMod.join(os.tmpdir(), 'jarv-refcache-'));
+  const prevHome = process.env.HOME;
+  process.env.HOME = dir;
+  try {
+    // A tiny dummy "image" + a pre-seeded cache entry so the vision call path
+    // (which would need a real endpoint and read an image) is never hit.
+    const img = pathMod.join(dir, 'ref.jpg');
+    await fsMod.writeFile(img, Buffer.from('fake-image-bytes'));
+    const stat = await fsMod.stat(img);
+    const key = `${img}\u0000${stat.mtimeMs}\u0000llava`;
+    const cacheDir = pathMod.join(dir, '.jarv-genie', 'blender');
+    const cacheFile = pathMod.join(cacheDir, 'spec-cache.json');
+    await fsMod.mkdir(cacheDir, { recursive: true });
+    await fsMod.writeFile(cacheFile, JSON.stringify({
+      [key]: { summary: 'cached spec', parts: [{ name: 'Head', primitive: 'sphere' }], proportions: {}, raw: '{}' },
+    }));
+    // Config with an unreachable vision endpoint: if the cache is honored we get
+    // parts back instantly; if it re-analyzes it would try to fetch and fail/throw.
+    const config = {
+      providers: { primary: { baseUrl: 'http://127.0.0.1:1/v1', model: 'x' }, fallback: null },
+      computer: { visionModel: 'llava', visionEndpoint: 'http://127.0.0.1:1/v1' },
+    } as never;
+    const spec = await describeToSpec(img, config, 'llava');
+    assert.ok(Array.isArray(spec.parts));
+    assert.strictEqual(spec.parts?.[0]?.name, 'Head');
+    assert.strictEqual(spec.summary, 'cached spec');
+  } finally {
+    process.env.HOME = prevHome;
+    await rmPatch(dir);
+  }
+
+  async function rmPatch(p: string) {
+    const { rm } = await import('node:fs/promises');
+    await rm(p, { recursive: true, force: true });
+  }
+});

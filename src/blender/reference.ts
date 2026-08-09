@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import type { JarvGenieConfig } from '../config/index.js';
 import { describeImage } from '../computer/index.js';
 
@@ -12,6 +14,14 @@ import { describeImage } from '../computer/index.js';
  * scale + rotation + material color + aspect), which the text model then turns
  * into real bpy. RAM-light: reuses the existing vision endpoint, no extra models,
  * no GPU; the agent only reads the returned JSON spec.
+ *
+ * NOTE ON LATENCY / CACHING: on an 8GB M1 already running Blender, a single
+ * llava structured-analysis of a photo takes ~40-80s (cold model load + inference),
+ * and Ollama may page the model out between separate HTTP calls. To avoid re-paying
+ * that every prompt, the structured spec is CACHED by image path + mtime + vision
+ * model under ~/.jarv-genie/blender/spec-cache.json (isolated from Jarv memory,
+ * like the named-parts snapshot). Re-referencing the same unchanged image reuses
+ * the cached spec in ~0ms.
  */
 
 /** Match an absolute local image path (png/jpg/jpeg) anywhere in a prompt, so
@@ -40,28 +50,79 @@ Return STRICT JSON ONLY — no markdown, no commentary, no prose. If something i
  "parts":[{"name":"...","primitive":"cube|sphere|cylinder|cone|torus|plane","position":[x,y,z],"scale":[x,y,z],"rotation_deg":[x,y,z],"parent":null|"name"}],
  "boolean_operations":[{"operation":"union|difference|intersect","base":"partName","tool":"partName"}]}`;
 
-/** Ask the local vision model for a structured spec. */
+export interface ShapeSpec {
+  summary: string;
+  parts: Array<Record<string, unknown>>;
+  proportions: Record<string, number> | null;
+  raw: string;
+}
+
+/** Stable cache key: image path + its mtime + the vision model used, so an edited
+ *  file or a different model never serves a stale shape. */
+function specCacheKey(imagePath: string, mtimeMs: number, model: string): string {
+  return `${imagePath}\u0000${mtimeMs}\u0000${model}`;
+}
+
+function specCacheFile(): string {
+  return path.join(process.env.HOME ?? '/', '.jarv-genie', 'blender', 'spec-cache.json');
+}
+
+async function readSpecCache(): Promise<Record<string, { summary: string; parts: Array<Record<string, unknown>>; proportions: Record<string, number> | null; raw: string }>> {
+  try {
+    return JSON.parse(await fs.readFile(specCacheFile(), 'utf8')) as Record<string, ShapeSpec>;
+  } catch {
+    return {};
+  }
+}
+
+async function writeSpecCache(
+  c: Record<string, { summary: string; parts: Array<Record<string, unknown>>; proportions: Record<string, number> | null; raw: string }>,
+): Promise<void> {
+  try {
+    await fs.mkdir(path.dirname(specCacheFile()), { recursive: true });
+    await fs.writeFile(specCacheFile(), JSON.stringify(c), 'utf8');
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Ask the local vision model for a structured spec. Cached by image path+mtime
+ *  +model so re-referencing the same image is instant. Best-effort. */
 export async function describeToSpec(
   imagePath: string,
   config: JarvGenieConfig,
   visionModel?: string,
-): Promise<{ summary: string; parts: Array<Record<string, unknown>>; proportions: Record<string, number> | null; raw: string }> {
-  const model = visionModel;
-  // Prompt describing to return the JSON spec; describeImage hits the configured
-  // Ollama vision endpoint (llava default, moondream available).
+): Promise<ShapeSpec> {
+  const model = visionModel ?? 'llava';
+  let mtimeMs = 0;
+  try {
+    const st = await fs.stat(imagePath);
+    mtimeMs = st.mtimeMs;
+  } catch {
+    mtimeMs = 0; // may not exist (test path) — cache miss is fine
+  }
+  const key = specCacheKey(imagePath, mtimeMs, model);
+  const cache = await readSpecCache();
+  const hit = cache[key];
+  if (hit && Array.isArray(hit.parts)) return { ...hit };
+
   const question =
     'Look at this reference image and return the STRICT JSON 3D shape spec (shape_summary, proportions {width_over_height,depth_over_width}, aspect, parts [{name,primitive,position,scale,rotation_deg,parent}], boolean_operations). Use only: cube sphere cylinder cone torus plane. Capture real proportions and arrangement.';
   const raw = await describeImage(imagePath, config, { question, model, system: SPEC_SYSTEM, format: 'json' });
   const spec = parseSpecJson(raw);
-  if (!spec) {
-    return { summary: raw.slice(0, 300), parts: [], proportions: null, raw };
+  const result: ShapeSpec = !spec
+    ? { summary: raw.slice(0, 300), parts: [], proportions: null, raw }
+    : {
+        summary: String(spec.shape_summary ?? raw.slice(0, 200)),
+        parts: Array.isArray(spec.parts) ? spec.parts : [],
+        proportions: spec.proportions && typeof spec.proportions === 'object' ? (spec.proportions as Record<string, number>) : null,
+        raw,
+      };
+  if (result.parts.length > 0) {
+    cache[key] = result;
+    void writeSpecCache(cache);
   }
-  return {
-    summary: String(spec.shape_summary ?? raw.slice(0, 200)),
-    parts: Array.isArray(spec.parts) ? spec.parts : [],
-    proportions: spec.proportions && typeof spec.proportions === 'object' ? (spec.proportions as Record<string, number>) : null,
-    raw,
-  };
+  return result;
 }
 
 /** Tolerantly parse the JSON spec out of a model reply (strip fences/trailing commas). */
