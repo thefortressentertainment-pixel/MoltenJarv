@@ -71,13 +71,15 @@ promisify(execFile)(bin, ['shape', image, '-o', out, '--weights', weights, '--qu
   const created = fs.existsSync(out) && fs.statSync(out).size > 0;
   const secs = Math.round((Date.now() - started) / 1000);
   if (!created) { console.error('[craft] ran but produced no GLB. stdout tail:\n' + (res.stdout || '').slice(-800)); process.exit(1); }
-  // Post-process the raw mesh: strip the fused "breakaway-tray" base + apply a green
-  // base color, so the GLB imports clean and colored no matter how it is opened.
+  // Post-process the raw mesh: strip the fused "breakaway-tray" base AND apply the
+  // reference image's dominant color, so the GLB matches the subject (green orc ->
+  // green, not a hard-coded default).
   try {
-    console.log('[craft] cleaning mesh (removing breakaway tray, applying green base)...');
-    const cleaned = await directClean(out);
+    console.log('[craft] cleaning mesh (removing breakaway tray, matching color to reference)...');
+    const dom = await dominantColorSync(image);
+    const cleaned = await directClean(out, dom);
     if (!cleaned.ok) console.warn('[craft] cleanup skipped:', cleaned.error || '');
-    console.log(`[craft] DONE in ${secs}s -> ${out} (${(fs.statSync(out).size / 1e6).toFixed(1)} MB). Tray removed + green base applied. Load in Blender: File>Import>glTF 2.0.`);
+    console.log(`[craft] DONE in ${secs}s -> ${out} (${(fs.statSync(out).size / 1e6).toFixed(1)} MB). Tray removed` + (dom ? ` + base color matched to reference (rgb ${dom.map((n) => Math.round(n * 255)).join(',')})` : ' (no color match)') + `. Load in Blender: File>Import>glTF 2.0.`);
   } catch (err) {
     console.warn('[craft] cleanup failed (craft itself succeeded):', err instanceof Error ? err.message : String(err));
     console.log(`[craft] DONE in ${secs}s -> ${out} (${(fs.statSync(out).size / 1e6).toFixed(1)} MB). Load via bpy_import_craft to strip the tray + color.`);
@@ -89,10 +91,42 @@ promisify(execFile)(bin, ['shape', image, '-o', out, '--weights', weights, '--qu
   process.exit(1);
 });
 
-/** Strip the breakaway tray + apply green via a quick headless Blender pass. */
-async function directClean(glb) {
+/** Dominant color of a reference image as [r,g,b] 0-1, or null. Headless Blender + numpy. */
+async function dominantColorSync(imagePath) {
+  const blender = '/Applications/Blender.app/Contents/MacOS/Blender';
+  if (!fs.existsSync(blender) || !fs.existsSync(imagePath)) return null;
+  const script = `import bpy, numpy as np, json
+im = bpy.data.images.load(${JSON.stringify(imagePath)})
+w,h = im.size
+px = np.asarray(im.pixels, dtype=float).reshape((h, w, 4))[..., :3]
+mr,mg,mb = [float(np.median(px[...,i])) for i in range(3)]
+print('DOMCOLOR'+json.dumps([round(mr,4),round(mg,4),round(mb,4)]))
+`;
+  const tmp = '/tmp/jarv_domcolor.mjs_tmp.py';
+  fs.writeFileSync(tmp, script);
+  try {
+    const res = execFileSync(blender, ['--background', '--python', tmp], { encoding: 'utf8', timeout: 30000 });
+    const m = /DOMCOLOR(\[[0-9.\-, ]+\])/.exec(res);
+    if (m?.[1]) {
+      const arr = JSON.parse(m[1]);
+      if (Array.isArray(arr) && arr.length === 3 && arr.every((n) => Number.isFinite(n))) return arr;
+    }
+    return null;
+  } catch { return null; } finally { try { fs.unlinkSync(tmp); } catch {} }
+}
+
+/** Strip the breakaway tray + apply the reference-matching color (only if provided)
+ *  via a quick headless Blender pass. */
+async function directClean(glb, color) {
   const blender = '/Applications/Blender.app/Contents/MacOS/Blender';
   if (!fs.existsSync(blender)) return { ok: false, error: 'Blender not found' };
+  const colorBake = color
+    ? `mat=bpy.data.materials.new('MAT_Crafted'); mat.use_nodes=True
+b=mat.node_tree.nodes.get('Principled BSDF'); b.inputs['Base Color'].default_value=(${color[0]},${color[1]},${color[2]},1.0)
+if len(mesh.data.materials)==0: mesh.data.materials.append(mat)
+else: mesh.data.materials[0]=mat
+`
+    : '';
   const script = `import bpy, os, bmesh, math, collections
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=${JSON.stringify(glb)})
@@ -113,11 +147,7 @@ _cut=_tt+0.04
 bm=bmesh.new(); bm.from_mesh(mesh.data)
 bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.z<_cut], context='VERTS')
 bm.to_mesh(mesh.data); bm.free(); mesh.data.update()
-mat=bpy.data.materials.new('MAT_Crafted'); mat.use_nodes=True
-b=mat.node_tree.nodes.get('Principled BSDF'); b.inputs['Base Color'].default_value=(0.12,0.45,0.18,1.0)
-if len(mesh.data.materials)==0: mesh.data.materials.append(mat)
-else: mesh.data.materials[0]=mat
-bpy.ops.object.select_all(action='SELECT')
+${colorBake}bpy.ops.object.select_all(action='SELECT')
 bpy.ops.export_scene.gltf(filepath=${JSON.stringify(glb)}, use_selection=False, export_format='GLB')
 print('CLEAN_OK', len(mesh.data.vertices))
 `;

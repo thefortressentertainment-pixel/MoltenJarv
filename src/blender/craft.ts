@@ -132,15 +132,25 @@ export async function runCraft(
     const res = await execFileAsync(bin, args, { timeout: 15 * 60_000, maxBuffer: 8 * 1024 * 1024 });
     const created = fs.existsSync(out) && fs.statSync(out).size > 0;
     if (!created) return { ok: false, error: 'craft ran but produced no GLB', detail: (res.stdout || '').slice(0, 800), durationMs: Date.now() - start };
-    // Post-process the raw mesh GLB: strip the fused breakaway-tray base and apply
-    // a green base material, so the output is a clean, colored figure regardless of
-    // how it is later imported (manual File>Import or bpy_import_craft).
-    const cleaned = await cleanCraftedGlb(out, null);
+    // Post-process the raw mesh: strip the fused breakaway-tray base AND apply the
+    // reference image's dominant color as the base material — so the crafted model
+    // matches the subject (a green orc -> green, a brown direwolf -> brown), rather
+    // than a hard-coded default or a bare gray mesh.
+    let color: [number, number, number] | null = null;
+    try { color = await dominantColorFromImage(imagePath); } catch { /* null */ }
+    const cleaned = await cleanCraftedGlb(out, color);
     if (!cleaned.ok) {
       // On cleanup failure, fall back to the raw mesh (don't silently drop the craft).
       return { ok: true, glb: out, note: 'craft done but cleanup skipped: ' + (cleaned.error ?? ''), durationMs: Date.now() - start };
     }
-    return { ok: true, glb: out, note: 'craft done; breakaway tray removed (no color imposed — texture/color per character later)', durationMs: Date.now() - start };
+    return {
+      ok: true,
+      glb: out,
+      note: color
+        ? `craft done; breakaway tray removed + base color matched to the reference (rgb ${color.map((n) => Math.round(n * 255)).join(',')})`
+        : 'craft done; breakaway tray removed (could not match color — mesh stays uncolored for per-character texturing)',
+      durationMs: Date.now() - start,
+    };
   } catch (err) {
     const e = err as { stdout?: string; stderr?: string; killed?: boolean };
     return {
@@ -149,6 +159,46 @@ export async function runCraft(
       detail: ((e.stdout ?? '') + ' ' + (e.stderr ?? '')).slice(0, 800),
       durationMs: Date.now() - start,
     };
+  }
+}
+
+/** Extract the dominant color of a reference image as [r,g,b] in 0-1 linear-ish
+ *  space, using a short headless Blender pass (PIL is bundled with Blender).
+ *  Returns null if it can't be determined. Used to color the crafted mesh so it
+ *  matches the reference (a green orc -> green model, not a hard-coded default). */
+export async function dominantColorFromImage(imagePath: string): Promise<[number, number, number] | null> {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const fs = await import('node:fs');
+  const blender = '/Applications/Blender.app/Contents/MacOS/Blender';
+  if (!fs.existsSync(blender)) return null;
+  const script = `import bpy, numpy as np, json
+img=${JSON.stringify(imagePath)}
+im = bpy.data.images.load(img)
+w,h = im.size
+px = np.asarray(im.pixels, dtype=float).reshape((h, w, 4))[..., :3]
+mr,mg,mb = [float(np.median(px[...,i])) for i in range(3)]
+print('DOMCOLOR'+json.dumps([round(mr,4),round(mg,4),round(mb,4)]))
+`;
+  const tmp = '/tmp/jarv_domcolor.py';
+  await fs.promises.writeFile(tmp, script, 'utf8');
+  try {
+    const res = await promisify(execFile)(blender, ['--background', '--python', tmp], { timeout: 30_000 });
+    await fs.promises.unlink(tmp).catch(() => {});
+    const m = /DOMCOLOR(\[[0-9.\-, ]+\])/.exec(res.stdout);
+    if (m?.[1]) {
+      try {
+        const raw = JSON.parse(m[1]) as unknown;
+        if (Array.isArray(raw) && raw.length === 3) {
+          const r = raw[0], g = raw[1], b = raw[2];
+          if (typeof r === 'number' && Number.isFinite(r) && typeof g === 'number' && Number.isFinite(g) && typeof b === 'number' && Number.isFinite(b)) return [r, g, b];
+        }
+      } catch { /* fall through */ }
+    }
+    return null;
+  } catch {
+    await fs.promises.unlink(tmp).catch(() => {});
+    return null;
   }
 }
 
