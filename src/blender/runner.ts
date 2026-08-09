@@ -235,6 +235,7 @@ CHARACTERS & COMPLEX MODELS (when the task is a named character, creature, or mu
 - Keep ALL part names stable across prompts so the user can say "make L_Forearm thicker" and you modify exactly that named object — never recreate it.
 - Plant the figure on the ground (Z=0) and give a neutral standing or described pose via bone/part rotation — do not split the figure into disconnected floating pieces.
 - REFINE, don't rebuild: on a follow-up prompt ("now make the head bigger"), edit the existing named part(s) by name, never delete the whole character to start over.
+- SHAPE KEYS for controllable faces/features: when you build a character's FACE or a deformable part (brow, jaw, mouth, ear, tusk, cheek), add NAMED shape keys so the user can later drive expressions by name (e.g. "make him frown" → set a key's value). Pattern: sk = obj.shape_key_add(name='BrowUp'); sk.value = 0.0   then later set   obj.data.shape_keys.key_blocks['BrowUp'].value = 1.0   (start with shape_key_add(name='Basis') first). Name keys clearly (BrowUp, BrowDown, Smile, Frown, JawOpen, Blink, TuskLift, Snarl). This gives a controllable "handle" for expressions WITHOUT Rigify/drivers — pure bpy, RAM-light.
 
 REFINE-TO-DETAIL (stop producing clustered geometric shapes — close the loop with feedback):
 - After building the base, call bpy_render_report to RENDER your current work to a PNG and get a VISION description of what you actually built (e.g. "a green sphere torso, two boxy gray legs, no head"). Use that description to SEE your result instead of assuming.
