@@ -18,7 +18,7 @@ function ensureDir(p) {
   fs.mkdirSync(p, { recursive: true });
 }
 
-// 1. three core ESM module.
+// 1. three core ESM module + its internal three.core dependency.
 ensureDir(outDir);
 const threeSrc = path.join(nodeThree, 'build', 'three.module.js');
 if (!fs.existsSync(threeSrc)) {
@@ -26,18 +26,30 @@ if (!fs.existsSync(threeSrc)) {
   process.exit(1);
 }
 fs.copyFileSync(threeSrc, path.join(outDir, 'three.module.js'));
+// three.module.js imports './three.core.js'; vendor that too so the ESM resolves.
+const threeCore = path.join(nodeThree, 'build', 'three.core.js');
+if (fs.existsSync(threeCore)) fs.copyFileSync(threeCore, path.join(outDir, 'three.core.js'));
 
-// 2. GLTFLoader (rewrite import from 'three' to './three.module.js').
+// 2. GLTFLoader (rewrite imports: 'three' -> ./three.module.js, and the two
+//    utils to same-dir so they resolve).
 const loaderSrc = path.join(nodeThree, 'examples', 'jsm', 'loaders', 'GLTFLoader.js');
 const loaderOut = path.join(outDir, 'GLTFLoader.js');
-const loaderCode = fs.readFileSync(loaderSrc, 'utf8').replace(/\bfrom\s+'three';/g, "from './three.module.js';");
+let loaderCode = fs.readFileSync(loaderSrc, 'utf8')
+  .replace(/\bfrom\s+'three';/g, "from './three.module.js';")
+  .replace(/\bfrom\s+'\.\.\/utils\/BufferGeometryUtils\.js';/g, "from './BufferGeometryUtils.js';")
+  .replace(/\bfrom\s+'\.\.\/utils\/SkeletonUtils\.js';/g, "from './SkeletonUtils.js';");
 fs.writeFileSync(loaderOut, loaderCode);
 
-// 3. Its dependency BufferGeometryUtils (relative import).
-const bufSrc = path.join(nodeThree, 'examples', 'jsm', 'utils', 'BufferGeometryUtils.js');
-const bufOut = path.join(outDir, 'BufferGeometryUtils.js');
-const bufCode = fs.readFileSync(bufSrc, 'utf8');
-fs.writeFileSync(bufOut, bufCode);
+// 2b. Its utils deps, with 'three' import rewrites to the vendored module.
+function vendorEsm(relPath, name) {
+  const src = path.join(nodeThree, relPath);
+  const out = path.join(outDir, name);
+  if (!fs.existsSync(src)) { console.error('missing ' + relPath); process.exit(1); }
+  const code = fs.readFileSync(src, 'utf8').replace(/\bfrom\s+'three';/g, "from './three.module.js';");
+  fs.writeFileSync(out, code);
+}
+vendorEsm('examples/jsm/utils/BufferGeometryUtils.js', 'BufferGeometryUtils.js');
+vendorEsm('examples/jsm/utils/SkeletonUtils.js', 'SkeletonUtils.js');
 
 // Sanity: verify our rewritten loader references the vendored module.
 const check = fs.readFileSync(loaderOut, 'utf8');
