@@ -48,3 +48,14 @@ This fix is in the **runtime extension** (`~/Library/Application Support/Blender
 5.1/extensions/user_default/jarv_blender/__init__.py`). The legacy
 `scripts/blender/jarv_blender.py` remains a modal/headless fallback (no live
 bridge) — the active Blender 5.1 extension is authoritative.
+
+## Auto-shade safety net (never flat-gray)
+
+Added `_ensure_shading()` called after every successful `execute_live_bpy`: every
+MESH with zero materials gets a neutral visible Principled material
+(`MAT_AutoShade`, light-gray, roughness 0.6) and a SUN light is added if none
+exists. Only objects the model did NOT already shade are touched (their material
+is left intact), so a build is guaranteed to have color + light even if the model
+skips its FINALIZE material pass. Confirmed in Blender: three new cubes were
+auto-assigned MAT_AutoShade while a pre-existing default-Material cube was
+untouched.
