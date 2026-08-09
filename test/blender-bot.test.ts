@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { buildPrompt } from '../src/cli/blenderBot.js';
+import { buildPrompt, isCommandMessage } from '../src/cli/blenderBot.js';
 
 test('buildPrompt appends a reference path when a photo was attached', () => {
   const p = buildPrompt('build an orc', '/tmp/photo.jpg');
@@ -17,6 +17,15 @@ test('buildPrompt returns the bare message when no photo', () => {
 
 test('buildPrompt trims and handles empty message returns empty', () => {
   assert.strictEqual(buildPrompt('   ', null), '');
+});
+
+test('isCommandMessage flags Telegram commands so /start never triggers a build', () => {
+  assert.ok(isCommandMessage('/start'));
+  assert.ok(isCommandMessage('  /help '));
+  assert.ok(isCommandMessage('/build orc'));
+  assert.ok(!isCommandMessage('build a green orc'));
+  assert.ok(!isCommandMessage(''));
+  assert.ok(!isCommandMessage('   '));
 });
 
 test('sendPhoto downscale path is guarded (no real network in tests)', async () => {

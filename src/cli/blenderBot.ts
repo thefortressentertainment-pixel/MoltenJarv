@@ -88,10 +88,32 @@ export function buildPrompt(message: string, photoPath: string | null): string {
   return text;
 }
 
+/** A Telegram command/system message (e.g. `/start`, `/help`) — never a build. */
+export function isCommandMessage(text: string): boolean {
+  return (text ?? '').trim().startsWith('/');
+}
+
 async function handleUpdate(client: TelegramClient, token: string, update: TgUpdate): Promise<void> {
   const chatId = update.message?.chat?.id;
   const msgText = update.message?.text ?? '';
   if (chatId === undefined || chatId === null) return;
+
+  // Ignore Telegram command/system messages (e.g. "/start" sent when the chat is
+  // reopened, "/help") — they are NOT build prompts. Without this, a restart that
+  // re-polls a stale "/start" fired an 18-step build for no reason.
+  const trimmed = msgText.trim();
+  if (isCommandMessage(trimmed)) {
+    await client
+      .sendMessage(
+        chatId,
+        'Blender Bot — send a build prompt (e.g. "build a green orc with tusks"), optionally with a reference photo.',
+      )
+      .catch(() => {});
+    return;
+  }
+
+  // Ignore empty/system messages with no text and no photo.
+  if (!update.message?.photo && !trimmed) return;
 
   // Busy guard: refuse simultaneous prompts (a build is already in flight).
   if (busy) {
@@ -107,7 +129,7 @@ async function handleUpdate(client: TelegramClient, token: string, update: TgUpd
     return;
   }
 
-  const prompt = buildPrompt(msgText, photoPath);
+  const prompt = buildPrompt(trimmed, photoPath);
   if (!prompt) {
     await client.sendMessage(chatId, 'Send a build prompt (optionally with a reference photo).').catch(() => {});
     return;
@@ -141,6 +163,30 @@ async function handleUpdate(client: TelegramClient, token: string, update: TgUpd
 
 let busy = false;
 
+/** Offset store: persist the last-seen update id so a restart resumes at the
+ *  point the bot last acked, instead of re-polling old /start / stale messages and
+ *  re-firing spurious builds. Isolated under ~/.jarv-genie/blender/. */
+function offsetFile(): string {
+  return path.join(process.env.HOME ?? '/', '.jarv-genie', 'blender', 'blender-bot-offset.json');
+}
+function loadOffset(): number {
+  try {
+    const raw = JSON.parse(fs.readFileSync(offsetFile(), 'utf8'));
+    const n = Number(raw?.offset);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+function saveOffset(offset: number): void {
+  try {
+    fs.mkdirSync(path.dirname(offsetFile()), { recursive: true });
+    fs.writeFileSync(offsetFile(), JSON.stringify({ offset }));
+  } catch {
+    /* best-effort */
+  }
+}
+
 export async function runBlenderBot(): Promise<void> {
   const secrets = getSecretStore();
   const token = secrets.get('BLENDER_BOT_TOKEN');
@@ -169,7 +215,8 @@ export async function runBlenderBot(): Promise<void> {
     process.stdout.write('[jarv-genie] no BLENDER_CHAT_ID set — message your bot to claim it\n');
   }
 
-  let offset = 0;
+  let offset = loadOffset();
+  if (offset > 0) process.stdout.write(`[jarv-genie] resuming from update id ${offset}\n`);
   for (;;) {
     let updates: TgUpdate[] = [];
     try {
@@ -180,7 +227,10 @@ export async function runBlenderBot(): Promise<void> {
       continue;
     }
     for (const u of updates) {
-      offset = (u.update_id ?? 0) + 1;
+      if ((u.update_id ?? 0) >= offset) {
+        offset = (u.update_id ?? 0) + 1;
+        saveOffset(offset);
+      }
       const cid = u.message?.chat?.id;
       // If a specific chat id is configured, only serve that chat (isolation). When
       // unset, serve whoever messages the bot so the owner can claim it via pair-set.
