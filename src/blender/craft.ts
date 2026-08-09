@@ -235,21 +235,23 @@ if not meshes: raise SystemExit('NO_MESH')
 mesh=meshes[-1]
 bpy.ops.object.select_all(action='DESELECT'); mesh.select_set(True); bpy.context.view_layer.objects.active=mesh
 _verts=[v.co for v in mesh.data.vertices]; _lo=min(v.z for v in _verts)
-_hist=collections.Counter(round(v.z,2) for v in _verts)
-def _wa(z):
-    vs=[v for v in _verts if abs(v.z-z)<0.02]
-    return max((math.hypot(v.x,v.y) for v in vs), default=0.0)
-_tt=_lo
-for z in sorted(_hist):
-    if z-_lo>0.20: break
-    if _wa(z)>0.5: _tt=z
-_cut=_tt+0.04
-bm=bmesh.new(); bm.from_mesh(mesh.data)
-bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.z<_cut], context='VERTS')
-bm.to_mesh(mesh.data); bm.free(); mesh.data.update()
+# CONSERVATIVE base cleanup: only remove a genuinely-flat, thin cap at the very
+# bottom IF it is clearly separate from the figure (a real "breakaway disc").
+# Hunyuan3D's broad feet are NOT a disc, so we must NOT slice into them.
+zlo=_lo; zhi=max(v.z for v in _verts)
+# 1) bottom band flatness (thin sheet at the very bottom?)
+band0=[v for v in _verts if v.z-zlo<0.02]
+flat0 = (max(v.z for v in band0)-min(v.z for v in band0)) if band0 else 0.0
+# 2) a thin co-planar sheet => a real breakaway disc; broad feet are NOT one
+nplane=len([v for v in _verts if v.z-zlo < 0.004])
+disc = nplane>50 and nplane> len(_verts)*0.004 and flat0<0.02
+if disc:
+    bm=bmesh.new(); bm.from_mesh(mesh.data)
+    bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.z-zlo<0.004], context='VERTS')
+    bm.to_mesh(mesh.data); bm.free(); mesh.data.update()
 ${colorBake}bpy.ops.object.select_all(action='SELECT')
 bpy.ops.export_scene.gltf(filepath=glb, use_selection=False, export_format='GLB')
-print('CLEAN_OK', len(mesh.data.vertices))
+print('CLEAN_OK', len(mesh.data.vertices), 'disc_removed', disc)
 `;
   const tmpScript = '/tmp/jarv_clean_glb.py';
   await fs.promises.writeFile(tmpScript, script, 'utf8');
