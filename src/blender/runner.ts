@@ -339,10 +339,36 @@ async function referenceHintFor(config: JarvGenieConfig, message: string): Promi
   const comp = (config as unknown as { computer?: { visionModel?: string } }).computer ?? {};
   try {
     const spec = await describeToSpec(path, config, comp.visionModel);
-    if (!spec.parts || spec.parts.length === 0) {
-      return `\n[Reference image at "${path}" described as: ${spec.summary.slice(0, 200)}] Use these proportions and build the shape with bpy_exec primitives — do NOT read the image bytes yourself (your text model cannot see image input); rely on this description only.`;
+    const parts = Array.isArray(spec.parts) ? spec.parts : [];
+    if (parts.length === 0) {
+      return `\n[Reference image at "${path}" described as: ${spec.summary.slice(0, 300)}] Build this with bpy_exec primitives following the description. Do NOT read the image bytes yourself (your model cannot see image input); rely on this description only.`;
     }
-    return `\n[Reference image at "${path}" analyzed by the local vision model — build from THIS structured spec, do NOT try to read the image yourself (your model has no image input). Shapel spec:\n${JSON.stringify(spec).slice(0, 1500)}\nParent the parts; match these proportions.]`;
+    // Render the spec as an actionable per-part template. The vision model's
+    // absolute coordinates are often unreliable, so give the builder the part
+    // NAMES, PARENT chain, PRIMITIVE, and PROPORTION ratios and let it place
+    // them sensibly (feet on Z=0, head above torso, limbs attached at joints).
+    const lines: string[] = [];
+    const seen = new Set<string>();
+    for (const p of parts.slice(0, 24)) {
+      let name = String((p as Record<string, unknown>).name ?? 'part').trim();
+      // Dedupe repeated/mislabeled names so the builder doesn't create two
+      // "Forearm and Hand Left" (a common llava slip that confuses articulation).
+      if (!name) name = 'part';
+      if (seen.has(name)) {
+        const i = 2;
+        name = `${name}_${i}`;
+        while (seen.has(name)) name = `${name}_${i + 1}`;
+      }
+      seen.add(name);
+      const prim = String((p as Record<string, unknown>).primitive ?? 'cube');
+      const parent = (p as Record<string, unknown>).parent ? String((p as Record<string, unknown>).parent) : null;
+      const scale = Array.isArray((p as Record<string, unknown>).scale) ? (p as Record<string, unknown>).scale as number[] : [];
+      const s = scale.slice(0, 3).filter((n) => Number.isFinite(Number(n)) && Number(n) > 0).map((n) => Number(n).toFixed(2)).join('/');
+      lines.push(`- "${name}": a ${prim}${parent ? `, child of "${parent}"` : ''}${s ? `, roughly x:y:z = ${s}` : ''}`);
+    }
+    return (
+      `\n[Reference image at "${path}" analyzed by local vision. Build THIS arrangement with bpy_exec primitives — do NOT read the image bytes yourself. Your text model has NO image input. The vision coordinates are approximate; PLACE the parts sensibly yourself: plant feet/legs on the ground (Z≈0), set the torso above, the head on top, and attach paired limbs (L_/R_) at the right joints pointing outward/downward. Overall proportions: ${spec.summary.replace(/\s+$/, '')} (aspect ${typeof spec.proportions?.width_over_height === 'number' ? spec.proportions.width_over_height.toFixed(2) : 'n/a'}).\nNamed parts to create (VERBATIM names, keep them stable so they can be refined later):\n${lines.join('\n')}\nParent the chain so nothing ends up disconnected, and use bevel/subsurf so parts are rounded.]`
+    );
   } catch (err) {
     // Vision is optional; fall back to plain text so the build still happens.
     return `\n[Note: reference image "${path}" could not be analyzed by local vision (${err instanceof Error ? err.message : String(err)}). Build from your own knowledge of the subject described. Do NOT attempt to read the image file yourself — your model cannot see image input.]`;

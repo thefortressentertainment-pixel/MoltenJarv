@@ -32,9 +32,10 @@ export function extractAbsoluteImagePath(text: string): string | null {
 
 /** The structured contract we ask the vision model to return (blender-vision-agent). */
 const SPEC_SYSTEM = `You analyze a reference image and emit a structured 3D shape spec that can be rebuilt in Blender from simple primitives (cube, sphere, cylinder, cone, torus, plane) and booleans.
-CRITICAL: the subject may be asymmetric and detailed — capture its true PROPORTIONS and ARRANGEMENT, not a literal 'it's a cup'. For example a wreath = a circular ring of many small leaves/branches; a dog = one body + head + 4 legs in a pose.
-Coordinate system: X left(-)/right(+), Y front(-)/back(+), Z up(+); objects may be grouped in one or a few parented parts.
-Return STRICT JSON only:
+CRITICAL: the subject may be asymmetric and detailed — capture its true PROPORTIONS and ARRANGEMENT, not a literal 'it's a cup'. For a wreath = a circular ring of many small leaves/branches; a dog = one body + head + 4 legs in a pose; a humanoid/creature = segmented TORSO + HEAD + 2 ARMS + 2 LEGS + FEET + any distinctive masses (ears, tusks/horns, tail, weapon, armor, belly).
+SEGMENT ENOUGH PARTS to capture the silhouette. For a standing character/creature you should produce at LEAST 6-9 named parts (torso, head, upper arm, forearm+hand, upper leg, lower leg+foot for each side as needed), NOT a single blob. Each part is ONE primitive with a parent link so it can be articulated later. Keep primitives simple (cube/sphere/cylinder/cone/torus/plane) — you are NOT doing a high-poly mesh.
+Coordinate system: X left(-)/right(+), Y front(-)/back(+), Z up(+); origin near the feet; scale in scene units (a standing character is roughly 2 units tall, torso ~1, head ~0.4, limbs ~0.9 long).
+Return STRICT JSON ONLY — no markdown, no commentary, no prose. If something is uncertain, make your best estimate and keep going:
 {"shape_summary":"2-line description", "proportions":{"width_over_height":N, "depth_over_width":N}, "aspect":1.0,
  "parts":[{"name":"...","primitive":"cube|sphere|cylinder|cone|torus|plane","position":[x,y,z],"scale":[x,y,z],"rotation_deg":[x,y,z],"parent":null|"name"}],
  "boolean_operations":[{"operation":"union|difference|intersect","base":"partName","tool":"partName"}]}`;
@@ -50,7 +51,7 @@ export async function describeToSpec(
   // Ollama vision endpoint (llava default, moondream available).
   const question =
     'Look at this reference image and return the STRICT JSON 3D shape spec (shape_summary, proportions {width_over_height,depth_over_width}, aspect, parts [{name,primitive,position,scale,rotation_deg,parent}], boolean_operations). Use only: cube sphere cylinder cone torus plane. Capture real proportions and arrangement.';
-  const raw = await describeImage(imagePath, config, { question, model });
+  const raw = await describeImage(imagePath, config, { question, model, system: SPEC_SYSTEM, format: 'json' });
   const spec = parseSpecJson(raw);
   if (!spec) {
     return { summary: raw.slice(0, 300), parts: [], proportions: null, raw };

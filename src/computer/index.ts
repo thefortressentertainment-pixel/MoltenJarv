@@ -98,6 +98,10 @@ export interface DescribeImageOptions {
   apiKeyEnv?: string;
   /** Prompt used when no question is given. */
   defaultPrompt?: string;
+  /** Optional system prompt (e.g. a strict JSON schema contract) sent before the user message. */
+  system?: string;
+  /** Ask the model to emit structured JSON (adds a JSON-only guard + format hint). */
+  format?: 'json';
 }
 
 /** Describe any image (screen grab or camera frame) using a vision-capable model. */
@@ -112,18 +116,21 @@ export async function describeImage(file: string, config: JarvGenieConfig, opts:
   const key = (keyEnv ? resolveApiKey({ apiKeyEnv: keyEnv, model }) : resolveApiKey(primary)) ?? 'not-set';
   const b64 = await fs.readFile(file).then((b) => b.toString('base64'));
 
-  const body = {
-    model,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: opts.question ?? opts.defaultPrompt ?? 'Describe this image concisely.' },
-          { type: 'image_url', image_url: { url: `data:image/png;base64,${b64}` } },
-        ],
-      },
+  const messages: Array<Record<string, unknown>> = [];
+  if (opts.system) messages.push({ role: 'system', content: opts.system });
+  messages.push({
+    role: 'user',
+    content: [
+      { type: 'text', text: opts.question ?? opts.defaultPrompt ?? 'Describe this image concisely.' },
+      { type: 'image_url', image_url: { url: `data:image/png;base64,${b64}` } },
     ],
-  };
+  });
+  const body: Record<string, unknown> = { model, messages };
+  if (opts.format === 'json') {
+    // OpenAI-compatible JSON mode / Ollama format=json: ask the model to emit
+    // only a JSON object and let Ollama gate the output as JSON.
+    body.format = 'json';
+  }
 
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
