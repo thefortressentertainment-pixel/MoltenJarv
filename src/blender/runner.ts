@@ -56,7 +56,7 @@ export async function liveBridgeState(): Promise<{ live: boolean; port: number }
 
 /** Execute bpy code against the LIVE open Blender scene (via the add-on bridge),
  *  or fall back to headless if no Blender is live. Returns a Jarv-friendly result. */
-export async function runLiveBpy(code: string): Promise<{ ok: boolean; result: unknown; mode: 'live' | 'headless' | 'no-blender' }> {
+export async function runLiveBpy(code: string, timeoutMs = 15_000): Promise<{ ok: boolean; result: unknown; mode: 'live' | 'headless' | 'no-blender' }> {
   const state = await liveBridgeState();
   if (state?.live) {
     try {
@@ -66,8 +66,9 @@ export async function runLiveBpy(code: string): Promise<{ ok: boolean; result: u
         body: JSON.stringify({ code }),
         // Short timeout so a bridge whose main-thread timer isn't firing (e.g.
         // Blender in --background, or a wedged session) can't hang the runner for
-        // the full 60s the add-on handler would otherwise block.
-        signal: AbortSignal.timeout(15_000),
+        // the full 60s the add-on handler would otherwise block. Heavy work (GLB
+        // export, big renders) passes a longer budget via timeoutMs.
+        signal: AbortSignal.timeout(timeoutMs),
       });
       const data = (await res.json().catch(() => ({ ok: false, error: `http ${res.status}` }))) as { ok?: boolean; error?: string };
       return { ok: data.ok === true, result: data, mode: 'live' };
@@ -476,18 +477,26 @@ export async function runBlenderExport(): Promise<{ ok: boolean; path: string; e
   const code = [
     `import bpy, os, json`,
     `target = '${outPath}'`,
+    `if os.path.exists(target): os.remove(target)  # so a stale file can't mask a failed export`,
     `# deselect all, then export the whole scene as GLB`,
     `bpy.ops.object.select_all(action='SELECT')`,
     `# selection-based GLB export needs at least one selected object; ensure one`,
     `if len(bpy.context.selected_objects) == 0 and bpy.data.objects:`,
     `    bpy.data.objects[0].select_set(True)`,
-    `# apply_modifiers=True so subsurf/bevel/displacement appear in the viewer GLB`,
-    `bpy.ops.export_scene.gltf(filepath=target, export_format='GLB', use_selection=False, apply_modifiers=True)`,
+    `# subsurf/bevel/displacement are applied automatically by the GLTF exporter`,
+    `bpy.ops.export_scene.gltf(filepath=target, export_format='GLB', use_selection=False)`,
     `print('EXPORTED', target, os.path.getsize(target))`,
   ].join('\n');
   try {
-    const r = await runLiveBpy(code);
-    if (!r.ok) return { ok: false, path: outPath, error: r.mode === 'no-blender' ? 'no live Blender open' : 'export bpy error', detail: JSON.stringify(r.result).slice(0, 300) };
+    // GLB export with apply_modifiers=True subdivides/bevels/displaces the whole
+    // scene, so it can exceed the normal 15s bpy budget — give it a generous one.
+    const r = await runLiveBpy(code, 120_000);
+    if (!r.ok) {
+      let reason = 'export bpy error';
+      if (r.mode === 'no-blender') reason = 'no live Blender open';
+      const detail = r.result && typeof r.result === 'object' ? (r.result as { error?: string }).error : undefined;
+      return { ok: false, path: outPath, error: reason, detail: detail ? detail.slice(0, 300) : JSON.stringify(r.result).slice(0, 300) };
+    }
     const fs = await import('node:fs');
     const exists = fs.existsSync(outPath) && fs.statSync(outPath).size > 0;
     if (!exists) return { ok: false, path: outPath, error: 'GLB file not produced', detail: 'export ran but no file at /tmp/jarv_blender_preview.glb' };
