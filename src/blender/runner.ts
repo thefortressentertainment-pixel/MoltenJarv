@@ -6,6 +6,7 @@ import { fileTools } from '../tools/filesystem.js';
 import { webTools } from '../tools/web.js';
 import { extractTextToolCalls } from '../agent/agent.js';
 import type { JarvGenieConfig } from '../config/index.js';
+import { describeToSpec } from './reference.js';
 
 /**
  * Dedicated RAM-light Blender runner.
@@ -32,6 +33,7 @@ import type { JarvGenieConfig } from '../config/index.js';
 const BLENDER_TOOL_NAMES = new Set<string>([
   'run_shell',
   'bpy_exec',
+  'bpy_reference',
   'file_read', 'file_write', 'file_list', 'file_delete',
   'web_search', 'web_read',
   'screen_capture',
@@ -131,6 +133,7 @@ CRITICAL — visual/spatial discipline:
 - Animation: to animate a running dog across 10 frames, rotate the same shoulder/hip bones or the LEG objects' rotation over time on one armature — do NOT create new armatures or pull existing ones apart. Set keyframes with bpy.context.scene.frame_set(f) + object.keyframe_insert(...).
 
 GENERAL:
+- If the task names a real thing (wreath, dog breed, chair, portrait) OR the user gives/implies a reference image path, FIRST call bpy_reference to get real proportions/parts, THEN build with bpy_exec from that spec. Prefer real reference over symbolic guesswork.
 - Prefer low-level bpy (bpy.data.objects, matrix assignment) over bpy.ops when context is flaky.
 - Use bpy_exec for scene edits; file/run_shell only if a task truly needs a script file or external asset.
 - Stay on the ONE request. Reply concisely with the object names created and the AABB/pose verification.
@@ -153,6 +156,34 @@ export async function newBlenderRouter(config: JarvGenieConfig, forceLocal = fal
   return router;
 }
 
+/** A bpy_reference tool: turn a reference image into a structured 3D shape-spec
+ *  via the local vision model, so a text-only Jarv builds from real proportions
+ *  (not symbolic guesses). RAM-light (reuses Ollama vision, no extra models). */
+function bpyReferenceTool(config: JarvGenieConfig): ToolDefinition {
+  return {
+    name: 'bpy_reference',
+    system: 'sense',
+    description:
+      'Turn a reference image (photo/concept/sketch) into a structured 3D shape-spec: primitives, position, scale, rotation, proportions, part names + parents. Use BEFORE building when the user references a real thing (a wreath, a specific dog breed, a chair) or points at a reference image path — so you build from real proportions, not a symbolic guess. Pass the absolute image path.',
+    inputSchema: {
+      type: 'object',
+      properties: { imagePath: { type: 'string', description: 'Absolute path to the reference image (png/jpg).' } },
+      required: ['imagePath'],
+    },
+    handler: async (args) => {
+      const imagePath = String(args.imagePath ?? '').trim();
+      if (!imagePath) return { ok: false, error: 'imagePath is required' };
+      try {
+        const comp = (config as unknown as { computer?: { visionModel?: string } }).computer ?? {};
+        const spec = await describeToSpec(imagePath, config, comp.visionModel);
+        return { ok: true, ...spec, note: 'Use these proportions/parts to build in bpy_exec; parent the parts so nothing ends up dissected.' };
+      } catch (err) {
+        return { ok: false, error: `reference vision failed: ${err instanceof Error ? err.message : String(err)} — reply with your best bpy guess and note it is unverified` };
+      }
+    },
+  };
+}
+
 /** Build a scoped registry holding only Blender tools. */
 export function blenderToolRegistry(config: JarvGenieConfig): ToolRegistry {
   const registry = new ToolRegistry();
@@ -161,6 +192,7 @@ export function blenderToolRegistry(config: JarvGenieConfig): ToolRegistry {
     ...fileTools(),
     ...webTools(),
     bpyExecTool(config),
+    bpyReferenceTool(config),
   ];
   const scoped = all.filter((t) => BLENDER_TOOL_NAMES.has(t.name));
   registry.registerMany(scoped);
