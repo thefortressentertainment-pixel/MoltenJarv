@@ -61,6 +61,7 @@ Usage:
   jarv-genie phone ls [dir]                   list files on the phone
   jarv-genie phone devices / set <host:port> / open <pkg> / shell <args>
   jarv-genie telegram    run the Telegram bridge (talk to Jarv + approve consequential actions remotely)
+  jarv-genie blender-bot run a dedicated Blender Telegram bot (isolated /api/blender, PNG renders)
   jarv-genie pair        show a one-time code to verify/trust a Telegram device
   jarv-genie trust       configure trusted-executor autonomy (allow/deny tools)
   jarv-genie perms       one-time: check/grant the macOS permissions Jarv needs
@@ -255,6 +256,15 @@ async function main(): Promise<void> {
   if (raw[0] === 'telegram') {
     const ctx = await buildAgent();
     await runTelegram(ctx);
+    return;
+  }
+
+  // Blender Branch: a dedicated Telegram bot for the isolated /api/blender runner.
+  // Deliberately does NOT buildAgent() (no full 84-tool suite / RAM), it only POSTs
+  // to the always-on hub. See src/cli/blenderBot.ts.
+  if (raw[0] === 'blender-bot' || raw[0] === 'blenderbot') {
+    const { runBlenderBot } = await import('./cli/blenderBot.js');
+    await runBlenderBot();
     return;
   }
 

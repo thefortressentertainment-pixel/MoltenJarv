@@ -294,6 +294,22 @@ function handler(ctx: AgentContext, opts: UiServerOptions, host: string) {
           return json(res, 502, { error: err instanceof Error ? err.message : String(err) });
         }
       }
+
+      // Render a viewport PNG still of the live Blender scene (used by the Blender
+      // Telegram Branch so it can send a picture back). Reuses the runner's render —
+      // one place to render, RAM-light (renders in the already-open Blender).
+      if (req.method === 'POST' && route === '/api/blender/render') {
+        try {
+          const { renderLiveScenePNG, liveBridgeState } = await import('../blender/runner.js');
+          const state = await liveBridgeState();
+          if (!state?.live) return json(res, 409, { error: 'no live Blender bridge — open Blender with the Jarv add-on to render' });
+          const shot = await renderLiveScenePNG('/tmp/jarv_blender_still.png', 640);
+          if (!shot.ok) return json(res, 502, { error: shot.error ?? 'render failed' });
+          return json(res, 200, { ok: true, path: shot.path });
+        } catch (err) {
+          return json(res, 502, { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
       if (req.method === 'POST' && route === '/api/new') {
         await ctx.memory.sessionReset(SESSION);
         return json(res, 200, { ok: true });

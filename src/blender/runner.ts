@@ -254,14 +254,14 @@ function bpyReferenceTool(config: JarvGenieConfig): ToolDefinition {
 
 /** Render a viewport PNG of the live Blender scene to /tmp via the bridge.
  *  Returns the path, or an error. RAM-light (renders in the already-open Blender). */
-async function renderLiveScenePNG(outPath = '/tmp/jarv_blender_report.png'): Promise<{ ok: boolean; path: string; error?: string }> {
+export async function renderLiveScenePNG(outPath = '/tmp/jarv_blender_report.png', size = 512): Promise<{ ok: boolean; path: string; error?: string }> {
   const code = [
     `import bpy, os`,
     `sc = bpy.context.scene`,
     `prev = (sc.render.filepath, sc.render.resolution_x, sc.render.resolution_y)`,
     `try:`,
     `    sc.render.filepath = '${outPath}'`,
-    `    sc.render.resolution_x = 512; sc.render.resolution_y = 512`,
+    `    sc.render.resolution_x = ${size}; sc.render.resolution_y = ${size}`,
     `    sc.render.image_settings.file_format = 'PNG'`,
     `    bpy.ops.render.opengl(write_still=True, view_context=True)`,
     `    print('RENDERED', os.path.getsize('${outPath}'))`,
