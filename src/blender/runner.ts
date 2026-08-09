@@ -144,11 +144,19 @@ const BLENDER_SYSTEM = (today: string): string =>
 
 CRITICAL — visual/spatial discipline:
 - A "wreath" is a circular arrangement of overlapping branches/leaves, not a plain doughnut + cones. A "running dog" is a quadruped with 4 legs in a RUNNING pose, one body, one head, proportioned — NOT detached separate primitives.
-- ESTABLISH A BASELINE first: clear the scene, choose a scale/pivot, then build the whole silhouette as ONE coherent object (or a few named, PARENTED parts) before adding detail.
-- REUSE NAMED objects: to modify/skew/rotate a limb, reference the SAME object by name (bpy.data.objects["Name"]) and apply the transform to THAT object — never spawn a fresh disconnected primitive per step.
+- ADDITIVE, NOT DESTRUCTIVE: DO NOT clear/delete existing objects when refining. If objects already exist, BUILD ON THEM — reuse or modify them by name and ADD new parts. Only remove objects when the user explicitly says "start over", "clear", or "new scene". Iterative prompts refine the current model; they never wipe it.
+- On a fresh build (no relevant objects), create the whole silhouette as ONE coherent object (or a few named, PARENTED parts) before adding detail.
+- REUSE NAMED objects: to modify/skew/rotate a limb, reference the SAME object by name (bpy.data.objects["Name"]) and apply the transform to THAT object — never spawn a fresh disconnected primitive per step, and never delete the existing one to remake it.
 - Do the whole edit in ONE bpy_exec: create, shape, place, parent, apply (do not split one logical step across many calls that each assume a fresh scene).
 - VERIFY at the end: call verify/AABB or read the returned object list and CONFIRM counts/positions make sense (e.g. 4 legs, not 8; parts still connected/parented — nothing "dissected" into loose pieces).
 - Animation: to animate a running dog across 10 frames, rotate the same shoulder/hip bones or the LEG objects' rotation over time on one armature — do NOT create new armatures or pull existing ones apart. Set keyframes with bpy.context.scene.frame_set(f) + object.keyframe_insert(...).
+
+CHARACTERS & COMPLEX MODELS (when the task is a named character, creature, or multi-part object):
+- Break it into NAMED, PARENTED parts you can refine later: e.g. "Torso", "Head", "L_UpperArm", "L_Forearm", "L_Hand", (mirror for R_...), "Pelvis", "L_Thigh", "L_Calf", "L_Foot". Parent each limb part to the part above it (forearm → upper arm; calf → thigh) and all to one root "Root".
+- Thickness + proportion matter more than count: joints should be wider, limbs taper, no part is a bare 2D box. Use cylinders/beveled boxes for limbs, spheres/flattened spheres for joints.
+- Keep ALL part names stable across prompts so the user can say "make L_Forearm thicker" and you modify exactly that named object — never recreate it.
+- Plant the figure on the ground (Z=0) and give a neutral standing or described pose via bone/part rotation — do not split the figure into disconnected floating pieces.
+- REFINE, don't rebuild: on a follow-up prompt ("now make the head bigger"), edit the existing named part(s) by name, never delete the whole character to start over.
 
 GENERAL:
 - REFERENCE IMAGE IS OPTIONAL, NOT REQUIRED. You do NOT need an image to build. By default, build from your OWN knowledge + the user's free-text description (e.g. "a sturdy pine workbench, thick top, 4 legs"). Use bpy_reference ONLY when the user explicitly gives an absolute image path (e.g. "/Users/.../wreath.jpg") or says "make it look like this picture" — then call it FIRST to extract proportions, then build with bpy_exec.
