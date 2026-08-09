@@ -148,6 +148,18 @@ export async function runBlenderBot(): Promise<void> {
     process.stdout.write(usage() + '\n');
     return;
   }
+  // A Telegram bot token is `<NUMBER>:<key>` (e.g. "1234567890:AA..."). The Jarv
+  // hub token ("jarv-...") and the DeepSeek key are NOT bot tokens — give a clear
+  // message instead of a confusing `getMe: Not Found`.
+  if (!/^\d+:[A-Za-z0-9_-]{20,}$/.test(token)) {
+    process.stdout.write(
+      '[jarv-genie] BLENDER_BOT_TOKEN does not look like a Telegram bot token.\n' +
+      'The @BotFather token format is: 1234567890:AAH_XXXX... (a number, then ":").\n' +
+      'Fix it with:  jarv-genie key set BLENDER_BOT_TOKEN\n' +
+      '(do NOT paste the hub token "jarv-..." or an API key.)\n',
+    );
+    return;
+  }
   const chatId = secrets.get('BLENDER_CHAT_ID');
   const hubToken = getTokenStore().get();
   const client = new TelegramClient(token);
@@ -174,6 +186,7 @@ export async function runBlenderBot(): Promise<void> {
       // unset, serve whoever messages the bot so the owner can claim it via pair-set.
       if (chatId && cid !== undefined && String(cid) !== String(chatId)) continue;
       try {
+        process.stdout.write(`[jarv-genie] update ${u.update_id} from chat ${String(cid ?? '?')} text="${String(u.message?.text ?? '').slice(0, 40)}"\n`);
         await handleUpdate(client, hubToken, u);
       } catch (err) {
         process.stdout.write(`[jarv-genie] handling error: ${err instanceof Error ? err.message : String(err)}\n`);
