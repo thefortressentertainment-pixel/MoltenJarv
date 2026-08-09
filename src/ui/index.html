@@ -40,9 +40,13 @@
     <div class="viewer-head">
       <span class="viewer-title">Blender 3D preview</span>
       <div class="viewer-actions">
-        <button id="viewerExportBtn" class="btn ghost small" title="Ask Jarv to export the current Blender scene to a GLB">Export from Blender</button>
+        <button id="viewerExportBtn" class="btn ghost small" title="Ask Jarv to export the current Blender scene to a GLB">Refresh preview</button>
         <button id="viewerClose" class="btn ghost small" title="Close">Close</button>
       </div>
+    </div>
+    <div class="viewer-refine">
+      <input id="viewerRefineInput" class="text" placeholder="Tell Jarv to build or refine a model, e.g. 'make the head bigger'…  (Enter to send)" autocomplete="off" />
+      <button id="viewerRefineBtn" class="btn">Refine</button>
     </div>
     <div class="viewer-canvas-wrap">
       <canvas id="viewerCanvas"></canvas>

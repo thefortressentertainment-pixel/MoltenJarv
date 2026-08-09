@@ -383,3 +383,7 @@ body {
 #viewerCanvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
 #viewerCanvas:active { cursor: grabbing; }
 .viewer-log { position: absolute; left: 0.6rem; bottom: 0.5rem; color: #ffd27f; font-size: 12px; background: rgba(0,0,0,0.55); padding: 0.2rem 0.5rem; border-radius: 6px; }
+
+/* Viewer refine input row */
+.viewer-refine { display: flex; gap: 0.4rem; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2c2c3a; }
+.viewer-refine .text { flex: 1; }

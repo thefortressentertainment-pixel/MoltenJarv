@@ -144,6 +144,42 @@ viewer.querySelector('#viewerExportBtn').addEventListener('click', async () => {
 
 closeBtn.addEventListener('click', () => viewer.classList.add('hidden'));
 
+// Refine: send a prompt to Jarv (build/refine in the live Blender), then refresh
+// the preview so you SEE the result. This closes the render-refine-view loop.
+const refineBtn = document.getElementById('viewerRefineBtn');
+const refineInput = document.getElementById('viewerRefineInput');
+
+async function refineLive() {
+  const msg = (refineInput.value || '').trim();
+  if (!msg) return;
+  refineBtn.disabled = true;
+  refineBtn.textContent = 'Sending…';
+  showLog(canvasWrap, `🧊 sending: ${msg}`);
+  try {
+    const res = await fetch('/api/blender', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error((body && body.error) || `build failed: HTTP ${res.status}`);
+    showLog(canvasWrap, `✅ Jarv: ${(body && body.text) ? body.text.slice(0, 160) : 'done'}`);
+    // Re-export and show the updated model.
+    const ex = await fetch('/api/blender/export', { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' } });
+    const bx = await ex.json();
+    if (!ex.ok || !bx.ok) throw new Error((bx && bx.error) || 'export failed');
+    await loadPreview();
+  } catch (err) {
+    showLog(canvasWrap, `⚠️ ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    refineBtn.disabled = false;
+    refineBtn.textContent = 'Refine';
+    refineInput.value = '';
+  }
+}
+if (refineBtn) refineBtn.addEventListener('click', refineLive);
+if (refineInput) refineInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') refineLive(); });
+
 // Expose a global so the chat UI can open the viewer.
 window.JarvViewer = {
   open() { viewer.classList.remove('hidden'); loadPreview(); },

@@ -35,6 +35,7 @@ const BLENDER_TOOL_NAMES = new Set<string>([
   'run_shell',
   'bpy_exec',
   'bpy_reference',
+  'bpy_render_report',
   'file_read', 'file_write', 'file_list', 'file_delete',
   'web_search', 'web_read',
   'screen_capture',
@@ -181,6 +182,12 @@ CHARACTERS & COMPLEX MODELS (when the task is a named character, creature, or mu
 - Plant the figure on the ground (Z=0) and give a neutral standing or described pose via bone/part rotation — do not split the figure into disconnected floating pieces.
 - REFINE, don't rebuild: on a follow-up prompt ("now make the head bigger"), edit the existing named part(s) by name, never delete the whole character to start over.
 
+REFINE-TO-DETAIL (stop producing clustered geometric shapes — close the loop with feedback):
+- After building the base, call bpy_render_report to RENDER your current work to a PNG and get a VISION description of what you actually built (e.g. "a green sphere torso, two boxy gray legs, no head"). Use that description to SEE your result instead of assuming.
+- Then compare what you SEE against the task/reference and make ONE targeted correction to the specific named part that is wrong (e.g. the report says "no head" → create/add the Head part; "legs are boxes" → reshape them with bevel/subsurf). Edit that ONE part by name — do not rebuild the whole scene.
+- Repeat the render → assess → correct loop up to ~3 times when a prompt asks to 'fine tune' or 'refine', each time fixing the single most-wrong detail.
+- If a reference image is available (bpy_reference gave a spec), compare the rendered result's proportions/colors against that spec and adjust named parts to match.
+
 GENERAL:
 - REFERENCE IMAGE IS OPTIONAL, NOT REQUIRED. You do NOT need an image to build. By default, build from your OWN knowledge + the user's free-text description (e.g. "a sturdy pine workbench, thick top, 4 legs"). Use bpy_reference ONLY when the user explicitly gives an absolute image path (e.g. "/Users/.../wreath.jpg") or says "make it look like this picture" — then call it FIRST to extract proportions, then build with bpy_exec.
 - REAL 3D, not flat: a "leg"/"column"/"handle"/"stem" is a 3D body (cylinder/rounded column), NOT a flat plane. A bench leg is a squat cylinder or beveled box — never a 2D rectangle. Give parts thickness and proper X/Y/Z scale.
@@ -238,6 +245,63 @@ function bpyReferenceTool(config: JarvGenieConfig): ToolDefinition {
   };
 }
 
+/** Render a viewport PNG of the live Blender scene to /tmp via the bridge.
+ *  Returns the path, or an error. RAM-light (renders in the already-open Blender). */
+async function renderLiveScenePNG(outPath = '/tmp/jarv_blender_report.png'): Promise<{ ok: boolean; path: string; error?: string }> {
+  const code = [
+    `import bpy, os`,
+    `sc = bpy.context.scene`,
+    `prev = (sc.render.filepath, sc.render.resolution_x, sc.render.resolution_y)`,
+    `try:`,
+    `    sc.render.filepath = '${outPath}'`,
+    `    sc.render.resolution_x = 512; sc.render.resolution_y = 512`,
+    `    sc.render.image_settings.file_format = 'PNG'`,
+    `    bpy.ops.render.opengl(write_still=True, view_context=True)`,
+    `    print('RENDERED', os.path.getsize('${outPath}'))`,
+    `except Exception as e:`,
+    `    print('RENDER_ERR', repr(e))`,
+    `finally:`,
+    `    sc.render.filepath, sc.render.resolution_x, sc.render.resolution_y = prev`,
+  ].join('\n');
+  const r = await runLiveBpy(code);
+  if (!r.ok) return { ok: false, path: outPath, error: r.mode === 'no-blender' ? 'no live Blender open' : 'render bpy error' };
+  try {
+    const fs = await import('node:fs');
+    if (!fs.existsSync(outPath) || fs.statSync(outPath).size === 0) return { ok: false, path: outPath, error: 'render produced no PNG' };
+    return { ok: true, path: outPath };
+  } catch (err) {
+    return { ok: false, path: outPath, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** A bpy_render_report tool: renders the current Blender build to a PNG and gets
+ *  a vision description of what Jarv ACTUALLY built, so it can see (not assume)
+ *  its work and correct the specific wrong part. RAM-light (reuses local vision). */
+function bpyRenderReportTool(config: JarvGenieConfig): ToolDefinition {
+  return {
+    name: 'bpy_render_report',
+    system: 'sense',
+    description:
+      'Render a viewport still of the current Blender scene and describe it with local vision. Use AFTER building to SEE your actual result (e.g. "a green sphere torso, two boxy gray legs, no head") so you can correct exactly the part that is wrong instead of guessing. Triggers a render + calls the local vision model; returns the vision description of your own work.',
+    inputSchema: { type: 'object', properties: {} },
+    handler: async () => {
+      const shot = await renderLiveScenePNG();
+      if (!shot.ok) return { ok: false, error: shot.error ?? 'render report failed' };
+      try {
+        const { describeImage } = await import('../computer/index.js');
+        const comp = (config as unknown as { computer?: { visionModel?: string } }).computer ?? {};
+        const desc = await describeImage(shot.path, config, {
+          model: comp.visionModel,
+          question: 'Describe this 3D model you just built: what is the overall shape, what parts are present (head/body/limbs/ears?), their proportions and colors, and what is MISSING or blocky. Be specific and honest.',
+        });
+        return { ok: true, description: desc.slice(0, 1200), note: 'Use this to correct the single most-wrong part by name, then re-render to verify.' };
+      } catch (err) {
+        return { ok: false, error: `vision description failed: ${err instanceof Error ? err.message : String(err)} — proceed with your best judgment` };
+      }
+    },
+  };
+}
+
 /** Build a scoped registry holding only Blender tools. */
 export function blenderToolRegistry(config: JarvGenieConfig): ToolRegistry {
   const registry = new ToolRegistry();
@@ -247,6 +311,7 @@ export function blenderToolRegistry(config: JarvGenieConfig): ToolRegistry {
     ...webTools(),
     bpyExecTool(config),
     bpyReferenceTool(config),
+    bpyRenderReportTool(config),
   ];
   const scoped = all.filter((t) => BLENDER_TOOL_NAMES.has(t.name));
   registry.registerMany(scoped);
