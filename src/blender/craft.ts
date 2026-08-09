@@ -46,6 +46,23 @@ export async function craftReady(): Promise<boolean> {
   }
 }
 
+/** Current free (inactive) memory in MB, best-effort on macOS. Used to refuse a
+ *  craft before it thrashes the machine. Returns null if it can't be read. */
+export async function freeMemMB(): Promise<number | null> {
+  try {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const out = await promisify(execFile)('sysctl', ['-n', 'hw.memsize'], { timeout: 5000 });
+    const total = Number(out.stdout.trim()) || 0;
+    const vm = await promisify(execFile)('vm_stat', [], { timeout: 5000 });
+    const m = /Pages free:\s+(\d+)/.exec(vm.stdout);
+    if (!total || !m) return null;
+    return Math.round((Number(m[1]) * 4096) / 1048576); // pages*4KiB -> MB
+  } catch {
+    return null;
+  }
+}
+
 export interface CraftResult {
   ok: boolean;
   glb?: string;
@@ -71,6 +88,16 @@ export async function runCraft(
   const out = craftGlbPath();
   if (!fs.existsSync(bin)) return { ok: false, error: 'hy3d binary not installed — run the one-time craft setup' };
   if (!fs.existsSync(path.join(weights, 'model.fp16.safetensors'))) return { ok: false, error: 'hy3d shape weights missing' };
+
+  // RAM guard: a Q4 shape craft needs a few GB of headroom. Refuse BEFORE spawning
+  // so we never swap-thrash / freeze the 8GB machine (Docker/GPU VMs excluded).
+  const free = await freeMemMB();
+  if (free !== null && free < 2500) {
+    return {
+      ok: false,
+      error: `Not enough free RAM to craft (only ~${(free / 1024).toFixed(1)}GB free; a Q4 shape craft needs ~2.5GB+). Close memory-heavy apps (Docker Desktop, large VMs/editors) so this machine is quiet, then retry.`,
+    };
+  }
 
   const args = [
     'shape', imagePath, '-o', out,

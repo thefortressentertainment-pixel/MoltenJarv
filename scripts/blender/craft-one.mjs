@@ -12,7 +12,7 @@
  */
 import path from 'node:path';
 import fs from 'node:fs';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
@@ -49,7 +49,23 @@ try {
 const out = '/tmp/jarv_crafted.glb';
 try { fs.unlinkSync(out); } catch {}
 
-console.log(`[craft] hy3d shape image=${image} quantize=${quantize} octree=${octree} steps=${steps}`);
+// Free-RAM pre-flight so we never swap-thrash the machine.
+let freeMB = Infinity;
+try {
+  const totalMB = Number(execFileSync('sysctl', ['-n', 'hw.memsize'], { encoding: 'utf8' }).trim()) / 1048576;
+  const vmStr = execFileSync('vm_stat', [], { encoding: 'utf8' });
+  const pm = /Pages free:\s+(\d+)/.exec(vmStr);
+  if (pm) {
+    const freePages = Number(pm[1]);
+    freeMB = Math.max(0, Math.round((freePages * 4096) / 1048576));
+  }
+} catch {}
+if (freeMB !== Infinity && freeMB < 2500) {
+  console.error(`[craft] Only ~${(freeMB / 1024).toFixed(1)}GB free RAM; a Q4 craft needs ~2.5GB+. Close Docker Desktop / large VMs / editors and retry.`);
+  process.exit(3);
+}
+
+console.log(`[craft] hy3d shape image=${image} quantize=${quantize} octree=${octree} steps=${steps} (free≈${Math.round(freeMB / 1024)}GB)`);
 console.log('[craft] this is a multi-GB Metal compute — please be patient (30s-few min).');
 const started = Date.now();
 promisify(execFile)(bin, ['shape', image, '-o', out, '--weights', weights, '--quantize', String(quantize), '--octree', String(octree), '--steps', String(steps)],
