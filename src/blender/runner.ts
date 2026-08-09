@@ -133,7 +133,8 @@ CRITICAL — visual/spatial discipline:
 - Animation: to animate a running dog across 10 frames, rotate the same shoulder/hip bones or the LEG objects' rotation over time on one armature — do NOT create new armatures or pull existing ones apart. Set keyframes with bpy.context.scene.frame_set(f) + object.keyframe_insert(...).
 
 GENERAL:
-- If the task names a real thing (wreath, dog breed, chair, portrait) OR the user gives/implies a reference image path, FIRST call bpy_reference to get real proportions/parts, THEN build with bpy_exec from that spec. Prefer real reference over symbolic guesswork.
+- REFERENCE IMAGE IS OPTIONAL, NOT REQUIRED. You do NOT need an image to build. By default, build from your OWN knowledge + the user's free-text description (e.g. "a sturdy pine workbench, thick top, 4 legs"). Use bpy_reference ONLY when the user explicitly gives an absolute image path (e.g. "/Users/.../wreath.jpg") or says "make it look like this picture" — then call it FIRST to extract proportions, then build with bpy_exec.
+- You already know what common things look like (wreath, dog, chair, table). Use that + the description; do not stall waiting for an image.
 - Prefer low-level bpy (bpy.data.objects, matrix assignment) over bpy.ops when context is flaky.
 - Use bpy_exec for scene edits; file/run_shell only if a task truly needs a script file or external asset.
 - Stay on the ONE request. Reply concisely with the object names created and the AABB/pose verification.
@@ -164,7 +165,7 @@ function bpyReferenceTool(config: JarvGenieConfig): ToolDefinition {
     name: 'bpy_reference',
     system: 'sense',
     description:
-      'Turn a reference image (photo/concept/sketch) into a structured 3D shape-spec: primitives, position, scale, rotation, proportions, part names + parents. Use BEFORE building when the user references a real thing (a wreath, a specific dog breed, a chair) or points at a reference image path — so you build from real proportions, not a symbolic guess. Pass the absolute image path.',
+      'Turn a reference IMAGE FILE into a structured 3D shape-spec (primitives, position, scale, rotation, proportions, parts + parents) via the local vision model. Use ONLY when the user gives an absolute image path or says "make it look like this picture". For a normal text request like "make a wreath" with no image, just build from your own knowledge — do NOT call this. Pass the absolute image path.',
     inputSchema: {
       type: 'object',
       properties: { imagePath: { type: 'string', description: 'Absolute path to the reference image (png/jpg).' } },
