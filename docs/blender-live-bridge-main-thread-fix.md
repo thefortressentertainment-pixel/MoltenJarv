@@ -45,9 +45,10 @@ In the user's GUI Blender, the registered timer does the work automatically.
 ## Scope
 
 This fix is in the **runtime extension** (`~/Library/Application Support/Blender/
-5.1/extensions/user_default/jarv_blender/__init__.py`). The legacy
-`scripts/blender/jarv_blender.py` remains a modal/headless fallback (no live
-bridge) — the active Blender 5.1 extension is authoritative.
+5.1/extensions/user_default/jarv_blender/__init__.py`). A versioned copy of the
+add-on lives in the MoltenJarv repo at `scripts/blender/jarv_blender/` — deploy
+updates by copying `__init__.py` + `blender_manifest.toml` over the extensions
+dir entry and restarting Blender. The extension is authoritative.
 
 ## Auto-shade safety net (never flat-gray)
 

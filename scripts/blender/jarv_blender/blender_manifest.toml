@@ -1,0 +1,26 @@
+schema_version = "1.0.0"
+
+id = "jarv_blender"
+version = "0.1.0"
+name = "Jarv Blender Bridge"
+tagline = "Prompt the Jarv Genie AI assistant from inside Blender"
+maintainer = "Jarv Genie"
+type = "add-on"
+license = ["SPDX:GPL-2.0-or-later"]
+
+blender_version_min = "4.2.0"
+blender_version_max = "6.0.0"
+platforms = ["macos-arm64", "macos-x64", "windows-x64", "windows-arm64", "linux-x64", "linux-arm64"]
+
+tags = ["Development"]
+
+website = "https://github.com/thefortressentertainment-pixel/MoltenJarv"
+
+permissions = [
+  "INTERNET",
+]
+
+# Developer note: `permissions: INTERNET` is requested because the add-on POSTs
+# prompts to the Jarv hub (localhost:3001) via urllib. Blender surfaces this
+# permission at install time so the user is aware the add-on makes local network
+# calls to the always-on Jarv hub.
