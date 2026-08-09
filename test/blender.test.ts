@@ -28,12 +28,12 @@ test('blenderToolRegistry is scoped to only Blender-relevant tools (tiny schema)
   for (const heavy of ['email_send', 'schedule_add', 'remember', 'recall', 'judge', 'learn_skill', 'rag_query', 'log_delivery']) {
     assert.ok(!names.includes(heavy), `${heavy} must NOT be in the Blender toolset`);
   }
-  // Must include the Blender-driving essentials, incl. the live-scene bpy_exec
-  // and the reference-image spec tool.
-  for (const need of ['run_shell', 'bpy_exec', 'bpy_reference', 'file_read', 'file_write', 'web_search']) {
+  // Must include the Blender-driving essentials, incl. the live-scene bpy_exec,
+  // the reference-image spec tool, and the real-topology base humanoid.
+  for (const need of ['run_shell', 'bpy_exec', 'bpy_base_mesh', 'bpy_reference', 'file_read', 'file_write', 'web_search']) {
     assert.ok(names.includes(need), `${need} must be in the Blender toolset`);
   }
-  assert.ok(names.length <= 10, `Blender toolset stays tiny (got ${names.length})`);
+  assert.ok(names.length <= 12, `Blender toolset stays tiny (got ${names.length})`);
 });
 
 test('runLiveBpy reports no-blender cleanly when Blender is not open', async () => {

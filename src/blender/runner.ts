@@ -7,6 +7,7 @@ import { webTools } from '../tools/web.js';
 import { extractTextToolCalls } from '../agent/agent.js';
 import type { JarvGenieConfig } from '../config/index.js';
 import { describeToSpec, extractAbsoluteImagePath } from './reference.js';
+import { BASE_HUMANOID_SNIPPET } from './basemesh.js';
 import { loadBlenderSnapshot, renderBlenderSnapshot, saveBlenderSnapshot } from './state.js';
 
 /**
@@ -34,6 +35,7 @@ import { loadBlenderSnapshot, renderBlenderSnapshot, saveBlenderSnapshot } from 
 const BLENDER_TOOL_NAMES = new Set<string>([
   'run_shell',
   'bpy_exec',
+  'bpy_base_mesh',
   'bpy_reference',
   'bpy_render_report',
   'file_read', 'file_write', 'file_list', 'file_delete',
@@ -41,16 +43,35 @@ const BLENDER_TOOL_NAMES = new Set<string>([
   'screen_capture',
 ]);
 
-/** Read the live Blender bridge state written by the add-on, if Blender is open. */
+/** Read the live Blender bridge state. The add-on writes `blender-state.json`,
+ *  but that file can go stale (e.g. after a hub bounce or a Blender reopen) while
+ *  the bridge is actually still serving on port 3937. So we treat the state file
+ *  as a hint for the PORT, then CONFIRM liveness by probing the bridge itself —
+ *  a self-healing check that avoids "Blender not open" false negatives. */
 export async function liveBridgeState(): Promise<{ live: boolean; port: number } | null> {
+  let port = 3937;
+  let fileSaysLive = false;
+  let filePort: number | null = null;
   try {
     const fs = await import('node:fs/promises');
     const home = process.env.HOME ?? '/';
     const raw = await fs.readFile(home + '/.jarv-genie/blender-state.json', 'utf8');
     const s = JSON.parse(raw) as { live?: boolean; port?: number | null };
-    return { live: s.live === true, port: Number(s.port ?? 3937) };
+    fileSaysLive = s.live === true;
+    filePort = Number(s.port ?? 3937);
+    if (filePort > 0) port = filePort;
   } catch {
-    return null;
+    // no state file — still probe the default port below
+  }
+  // Probe the bridge directly: if it answers {live:true}, it's genuinely up even
+  // if the file is stale/absent. A short timeout so a wedged port can't hang us.
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(2500) });
+    const body = (await res.json().catch(() => ({}))) as { live?: boolean };
+    return { live: body.live === true, port };
+  } catch {
+    // Bridge unreachable — trust the file only if it says live and has a port.
+    return fileSaysLive && filePort ? { live: true, port } : { live: false, port };
   }
 }
 
@@ -112,6 +133,30 @@ function bpyExecTool(config: JarvGenieConfig): ToolDefinition {
         }
       }
       return { ok: r.ok, mode: r.mode, result: r.result };
+    },
+  };
+}
+
+/** A bpy_base_mesh tool: drop a real-topology base humanoid into the live scene as
+ *  a single smooth `Base_Humanoid` mesh, so character/creature builds start from a
+ *  proper silhouette (limbs attached, tapered) instead of a cluster of boxes.
+ *  The model then COLORS + SCULPTS + POSES it to match the reference — far closer
+ *  to 1:1 than rebuilding a biped from parts. RAM-light (one joined mesh). */
+function bpyBaseMeshTool(config: JarvGenieConfig): ToolDefinition {
+  return {
+    name: 'bpy_base_mesh',
+    system: 'sense',
+    description:
+      'Add a real-topology low-poly base humanoid to the live scene as ONE smooth mesh named "Base_Humanoid" (head, neck, torso, pelvis, shoulders, both arms+hands, both legs+feet). Use this FIRST for any humanoid/creature/character build (orc, human, goblin, elf, warrior...) instead of assembling many disconnected boxes — starting from this silhouette gives proper limb junctions and a smooth body. Then COLOR it (green orc skin), SCULPT/tune the named proportions (broaden shoulders, add a snout/tusks/ears), and POSE it. Additive: never deletes existing objects; if Base_Humanoid already exists it is left alone.',
+    inputSchema: { type: 'object', properties: {} },
+    handler: async () => {
+      const r = await runLiveBpy(BASE_HUMANOID_SNIPPET);
+      if (!r.ok) return { ok: false, mode: r.mode, result: r.result };
+      return {
+        ok: true,
+        mode: r.mode,
+        note: 'Base_Humanoid created. Now color it to match the task (e.g. green orc skin), then sculpt/tune named parts (broaden shoulders for an orc, add tusks/snout/ears) and pose it. Reuse Base_Humanoid by name; keep the joined body connected.',
+      };
     },
   };
 }
@@ -183,6 +228,8 @@ COLOR (apply the described colors — this must not be skipped):
 - Do not default to a neutral gray when a color word is present — the gray auto-shade is only a fallback for when NO color was mentioned.
 
 CHARACTERS & COMPLEX MODELS (when the task is a named character, creature, or multi-part object):
+- BASE-FIRST for humanoid/biped characters (orc, human, goblin, elf, warrior, etc.): call bpy_base_mesh to drop in the single-smooth-mesh "Base_Humanoid" silhouette FIRST, then COLOR it (e.g. MAT green orc skin), SCULPT/tune its named proportions (broaden shoulders, add a snout/tusks/ears/jaw), and POSE it. Do NOT rebuild a biped from many disconnected boxes — the base already has attached, tapered limbs and a smooth body, which reads far closer to the subject. Keep it as one connected body; edit by name (Base_Humanoid).
+- If the character is non-humanoid (quadruped, creature), fall back to assembling named, parented parts — but still aim for a coherent silhouette, not scattered primitives.
 - Break it into NAMED, PARENTED parts you can refine later: e.g. "Torso", "Head", "L_UpperArm", "L_Forearm", "L_Hand", (mirror for R_...), "Pelvis", "L_Thigh", "L_Calf", "L_Foot". Parent each limb part to the part above it (forearm → upper arm; calf → thigh) and all to one root "Root".
 - Thickness + proportion matter more than count: joints should be wider, limbs taper, no part is a bare 2D box. Use cylinders/beveled boxes for limbs, spheres/flattened spheres for joints.
 - Keep ALL part names stable across prompts so the user can say "make L_Forearm thicker" and you modify exactly that named object — never recreate it.
@@ -353,6 +400,7 @@ export function blenderToolRegistry(config: JarvGenieConfig): ToolRegistry {
     ...fileTools(),
     ...webTools(),
     bpyExecTool(config),
+    bpyBaseMeshTool(config),
     bpyReferenceTool(config),
     bpyRenderReportTool(config),
   ];
