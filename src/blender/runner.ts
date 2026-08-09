@@ -311,29 +311,62 @@ function bpyImportCraftTool(config: JarvGenieConfig): ToolDefinition {
     inputSchema: {
       type: 'object',
       properties: {
-        material: { type: 'string', description: 'Optional base color to apply: green, brown, red, gray, white. Omit to keep the mesh as-is (no imposed color).' },
+        material: { type: 'string', description: 'Optional single base color to apply: green, brown, red, gray, white. Omit to keep the mesh as-is.' },
+        reference: { type: 'string', description: 'Optional absolute path to the reference image. If given, apply up to 3 region colors matched to it (skin/armor/trim via a height ramp) so the model renders true to the photo.' },
       },
     },
     handler: async (args) => {
       const matWord = String(args.material ?? '').trim().toLowerCase();
+      const referencePath = String(args.reference ?? '').trim();
       const colorMap: Record<string, [number, number, number]> = {
         green: [0.12, 0.45, 0.18], red: [0.6, 0.1, 0.1], brown: [0.4, 0.28, 0.16],
         gray: [0.55, 0.55, 0.55], white: [0.9, 0.9, 0.9], black: [0.08, 0.08, 0.08],
       };
-      const rgb = colorMap[matWord]; // undefined => no imposed color
-      const colorBake =
-        rgb
-          ? [
-              `        mat=bpy.data.materials.get('MAT_Crafted') or bpy.data.materials.new(name='MAT_Crafted')`,
-              `        mat.use_nodes=True`,
-              `        b=mat.node_tree.nodes.get('Principled BSDF')`,
-              `        b.inputs['Base Color'].default_value=(${rgb[0]},${rgb[1]},${rgb[2]},1.0)`,
-              `        b.inputs['Roughness'].default_value=0.7`,
-              `        if len(mesh.data.materials)==0:`,
-              `            mesh.data.materials.append(mat)`,
-              `        else:`,
-              `            mesh.data.materials[0]=mat`,
-            ].join('\n')
+      const rgb = colorMap[matWord]; // single forced color, or null
+      // region colors from the reference (up to 3) — computed headless, quick
+      let region: Array<[number, number, number]> = [];
+      if (referencePath) {
+        try {
+          const fs = await import('node:fs');
+          if (fs.existsSync(referencePath)) {
+            const { regionColorsFromImage } = await import('./craft.js');
+            region = await regionColorsFromImage(referencePath);
+          }
+        } catch { /* [] */ }
+      }
+      const colorBake = rgb
+        ? [
+            `        mat=bpy.data.materials.get('MAT_Crafted') or bpy.data.materials.new(name='MAT_Crafted')`,
+            `        mat.use_nodes=True`,
+            `        b=mat.node_tree.nodes.get('Principled BSDF')`,
+            `        b.inputs['Base Color'].default_value=(${rgb[0]},${rgb[1]},${rgb[2]},1.0)`,
+            `        b.inputs['Roughness'].default_value=0.7`,
+            `        if len(mesh.data.materials)==0:`,
+            `            mesh.data.materials.append(mat)`,
+            `        else:`,
+            `            mesh.data.materials[0]=mat`,
+          ].join('\n')
+        : region.length
+                  ? (() => {
+                      const r0 = region[0]!, r1 = region[1], r2 = region[2];
+                      return [
+                        `        mat=bpy.data.materials.get('MAT_Crafted') or bpy.data.materials.new(name='MAT_Crafted')`,
+                        `        mat.use_nodes=True`,
+                        `        nt=mat.node_tree; nt.nodes.clear()`,
+                        `        o=nt.nodes.new('ShaderNodeOutputMaterial'); pc=nt.nodes.new('ShaderNodeTexCoord'); bs=nt.nodes.new('ShaderNodeBsdfPrincipled')`,
+                        `        at=nt.nodes.new('ShaderNodeAttribute'); at.attribute_name='position'; at.attribute_type='GEOMETRY'`,
+                        `        sp=nt.nodes.new('ShaderNodeSeparateXYZ'); nt.links.new(at.outputs['Vector'], sp.inputs['Vector'])`,
+                        `        m=nt.nodes.new('ShaderNodeMapRange'); m.inputs[1].default_value=0.0; m.inputs[2].default_value=2.0; m.inputs[3].default_value=0.0; m.inputs[4].default_value=1.0`,
+                        `        nt.links.new(sp.outputs['Z'], m.inputs[0]); rp=nt.nodes.new('ShaderNodeValToRGB'); rp.color_ramp.elements[0].color=(${r0[0]},${r0[1]},${r0[2]},1.0)`,
+                        `        nt.links.new(m.outputs[0], rp.inputs[0])`,
+                        ...(r1 ? [`        e=rp.color_ramp.elements.new(0.5); e.color=(${r1[0]},${r1[1]},${r1[2]},1.0)`] : []),
+                        ...(r2 ? [`        e=rp.color_ramp.elements.new(0.85); e.color=(${r2[0]},${r2[1]},${r2[2]},1.0)`] : []),
+                        `        nt.links.new(rp.outputs['Color'], bs.inputs['Base Color'])`,
+                        `        nt.links.new(bs.outputs['BSDF'], o.inputs['Surface']); nt.links.new(pc.outputs['Generated'], at.inputs['Vector'])`,
+                        `        if len(mesh.data.materials)==0: mesh.data.materials.append(mat)`,
+                        `        else: mesh.data.materials[0]=mat`,
+                      ].join('\n');
+                    })()
           : `        # (no color imposed — keep the figure as-is; texture/color per character)`;
       const glb = '/tmp/jarv_crafted.glb';
       const code = [
@@ -382,7 +415,7 @@ function bpyImportCraftTool(config: JarvGenieConfig): ToolDefinition {
       return {
         ok: true,
         mode: r.mode,
-        note: `Imported crafted mesh as "Crafted", removed the default Cube/Plane + stripped the breakaway tray + smooth-shaded${rgb ? ` and applied ${matWord} material` : ' (no color imposed — color/texture per the character)'}. Now refine it.`,
+        note: `Imported crafted mesh as "Crafted", removed the default Cube/Plane + handled base + smooth-shaded${rgb ? ` and applied ${matWord} material` : region.length ? ` and applied ${region.length} region colors matched to the reference` : ' (no color imposed — color/texture per the character)'}. Now refine it.`,
       };
     },
   };

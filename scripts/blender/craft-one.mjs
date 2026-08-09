@@ -4,7 +4,7 @@
  * native MLX Hunyuan3D binary (staged at ~/.jarv-genie/craft/).
  *
  * Usage:
- *   node scripts/blender/craft-one.mjs <image.png> [--octree 192] [--quantize 4]
+ *   node scripts/blender/craft-one.mjs <image.png> [--octree 256] [--quantize 4]
  *
  * RAM CRITICAL: the craft is a multi-GB Metal compute. It MUST run with Blender
  * (and any other memory hogs) closed. This script refuses if the Blender bridge
@@ -28,7 +28,7 @@ if (!image) {
   process.exit(2);
 }
 const flag = (k, d) => { const i = args.indexOf(k); return i >= 0 ? Number(args[i + 1]) : d; };
-const octree = flag('--octree', 192);
+const octree = flag('--octree', 256);
 const quantize = flag('--quantize', 4);
 const steps = flag('--steps', 30);
 
@@ -75,11 +75,11 @@ promisify(execFile)(bin, ['shape', image, '-o', out, '--weights', weights, '--qu
   // reference image's dominant color, so the GLB matches the subject (green orc ->
   // green, not a hard-coded default).
   try {
-    console.log('[craft] cleaning mesh (removing breakaway tray, matching color to reference)...');
-    const dom = await dominantColorSync(image);
+    console.log('[craft] cleaning mesh (removing breakaway tray, matching region colors to reference)...');
+    const dom = await regionColorsSync(image);
     const cleaned = await directClean(out, dom);
     if (!cleaned.ok) console.warn('[craft] cleanup skipped:', cleaned.error || '');
-    console.log(`[craft] DONE in ${secs}s -> ${out} (${(fs.statSync(out).size / 1e6).toFixed(1)} MB). Tray removed` + (dom ? ` + base color matched to reference (rgb ${dom.map((n) => Math.round(n * 255)).join(',')})` : ' (no color match)') + `. Load in Blender: File>Import>glTF 2.0.`);
+    console.log(`[craft] DONE in ${secs}s -> ${out} (${(fs.statSync(out).size / 1e6).toFixed(1)} MB). Tray preserved/clean` + (dom.length ? ` + ${dom.length} region colors matched (${dom.map((c) => 'rgb(' + c.map((n) => Math.round(n * 255)).join(',') + ')').join(', ')})` : ' (no color match)') + `. Load in Blender: File>Import>glTF 2.0.`);
   } catch (err) {
     console.warn('[craft] cleanup failed (craft itself succeeded):', err instanceof Error ? err.message : String(err));
     console.log(`[craft] DONE in ${secs}s -> ${out} (${(fs.statSync(out).size / 1e6).toFixed(1)} MB). Load via bpy_import_craft to strip the tray + color.`);
@@ -91,38 +91,63 @@ promisify(execFile)(bin, ['shape', image, '-o', out, '--weights', weights, '--qu
   process.exit(1);
 });
 
-/** Dominant color of a reference image as [r,g,b] 0-1, or null. Headless Blender + numpy. */
-async function dominantColorSync(imagePath) {
+/** Up to 3 distinct region colors of a reference image as [[r,g,b]..] 0-1, or [].
+ *  Headless Blender + numpy color quantization (matches regionColorsFromImage). */
+async function regionColorsSync(imagePath) {
   const blender = '/Applications/Blender.app/Contents/MacOS/Blender';
-  if (!fs.existsSync(blender) || !fs.existsSync(imagePath)) return null;
+  if (!fs.existsSync(blender) || !fs.existsSync(imagePath)) return [];
   const script = `import bpy, numpy as np, json
 im = bpy.data.images.load(${JSON.stringify(imagePath)})
 w,h = im.size
 px = np.asarray(im.pixels, dtype=float).reshape((h, w, 4))[..., :3]
-mr,mg,mb = [float(np.median(px[...,i])) for i in range(3)]
-print('DOMCOLOR'+json.dumps([round(mr,4),round(mg,4),round(mb,4)]))
+q = np.floor(px*8).astype(int); flat = q.reshape(-1,3)
+uniq,counts = np.unique(flat, axis=0, return_counts=True)
+order = np.argsort(-counts); picked=[]
+for idx in order:
+    c = (uniq[idx]+0.5)/8.0
+    if all(np.linalg.norm(c-p)>0.18 for p in picked):
+        picked.append(c)
+    if len(picked)>=3: break
+print('REGIONCOLORS'+json.dumps([[round(float(x),4) for x in c] for c in picked]))
 `;
   const tmp = '/tmp/jarv_domcolor.mjs_tmp.py';
   fs.writeFileSync(tmp, script);
   try {
     const res = execFileSync(blender, ['--background', '--python', tmp], { encoding: 'utf8', timeout: 30000 });
-    const m = /DOMCOLOR(\[[0-9.\-, ]+\])/.exec(res);
+    const m = /REGIONCOLORS(\[\[[0-9.\-, \[\]]+\]\])/.exec(res);
     if (m?.[1]) {
-      const arr = JSON.parse(m[1]);
-      if (Array.isArray(arr) && arr.length === 3 && arr.every((n) => Number.isFinite(n))) return arr;
+      const raw = JSON.parse(m[1]);
+      if (Array.isArray(raw)) {
+        const arr = raw.filter((r) => Array.isArray(r) && r.length >= 3 && r.slice(0,3).every((n) => Number.isFinite(n))).map((r) => r.slice(0,3));
+        return arr.slice(0,3);
+      }
     }
-    return null;
-  } catch { return null; } finally { try { fs.unlinkSync(tmp); } catch {} }
+    return [];
+  } catch { return []; } finally { try { fs.unlinkSync(tmp); } catch {} }
 }
 
-/** Strip the breakaway tray + apply the reference-matching color (only if provided)
- *  via a quick headless Blender pass. */
-async function directClean(glb, color) {
+/** Strip any true breakaway disc (conservative) + bake up to 3 region colors as a
+ *  height-based ColorRamp material, via a quick headless Blender pass. */
+async function directClean(glb, colors) {
   const blender = '/Applications/Blender.app/Contents/MacOS/Blender';
   if (!fs.existsSync(blender)) return { ok: false, error: 'Blender not found' };
-  const colorBake = color
+  const c0 = colors && colors.length ? colors[0] : null;
+  const c1 = colors && colors.length > 1 ? colors[1] : null;
+  const c2 = colors && colors.length > 2 ? colors[2] : null;
+  const colorBake = c0
     ? `mat=bpy.data.materials.new('MAT_Crafted'); mat.use_nodes=True
-b=mat.node_tree.nodes.get('Principled BSDF'); b.inputs['Base Color'].default_value=(${color[0]},${color[1]},${color[2]},1.0)
+nt=mat.node_tree; nt.nodes.clear()
+out=nt.nodes.new('ShaderNodeOutputMaterial'); pos=nt.nodes.new('ShaderNodeTexCoord')
+bs=nt.nodes.new('ShaderNodeBsdfPrincipled')
+attr=nt.nodes.new('ShaderNodeAttribute'); attr.attribute_name='position'; attr.attribute_type='GEOMETRY'
+sep=nt.nodes.new('ShaderNodeSeparateXYZ'); nt.links.new(attr.outputs['Vector'], sep.inputs['Vector'])
+map=nt.nodes.new('ShaderNodeMapRange'); map.inputs[1].default_value=0.0; map.inputs[2].default_value=2.0; map.inputs[3].default_value=0.0; map.inputs[4].default_value=1.0
+nt.links.new(sep.outputs['Z'], map.inputs[0])
+ramp=nt.nodes.new('ShaderNodeValToRGB'); ramp.color_ramp.elements[0].color=(${c0[0]},${c0[1]},${c0[2]},1.0)
+nt.links.new(map.outputs[0], ramp.inputs[0])
+${c1 ? `e=ramp.color_ramp.elements.new(0.5); e.color=(${c1[0]},${c1[1]},${c1[2]},1.0)\n` : ''}${c2 ? `e=ramp.color_ramp.elements.new(0.85); e.color=(${c2[0]},${c2[1]},${c2[2]},1.0)\n` : ''}nt.links.new(ramp.outputs['Color'], bs.inputs['Base Color'])
+nt.links.new(bs.outputs['BSDF'], out.inputs['Surface'])
+nt.links.new(pos.outputs['Generated'], attr.inputs['Vector'])
 if len(mesh.data.materials)==0: mesh.data.materials.append(mat)
 else: mesh.data.materials[0]=mat
 `
