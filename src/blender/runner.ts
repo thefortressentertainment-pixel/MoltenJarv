@@ -131,14 +131,18 @@ export interface BlenderRunResult {
 }
 
 /** Verbatim shading/material finalize recipe the model is told to run last, so a
- *  build is never left flat-gray. Plain string (Python single-quoted) to avoid
- *  template-literal/backtick interaction. */
+ *  build is never left flat-gray or the wrong color. Plain string (Python
+ *  single-quoted) to avoid template-literal/backtick interaction. Includes a
+ *  color/material lookup so the model maps description words to real RGB. */
 const FINALIZE_SNIPPET = [
   'import bpy',
-  "wood = bpy.data.materials.new('MAT_Pine'); wood.use_nodes = True",
+  "# pick the color from the task's color/material words; default warm gray",
+  "named = {'red':(0.7,0.08,0.08),'green':(0.08,0.6,0.1),'blue':(0.1,0.15,0.7),'gold':(0.85,0.65,0.1),'wood':(0.48,0.34,0.21),'pine':(0.48,0.34,0.21),'oak':(0.55,0.4,0.25),'metal':(0.7,0.7,0.72),'silver':(0.75,0.75,0.76),'black':(0.05,0.05,0.05),'white':(0.9,0.9,0.9),'gray':(0.6,0.6,0.6)}",
+  "# COMPLETE THIS LINE: base_rgb = named['<the color/material word from the task>']",
+  "base_rgb = named.get('gray', (0.6,0.6,0.6))",
+  "wood = bpy.data.materials.new('MAT_Build'); wood.use_nodes = True",
   "bsdf = wood.node_tree.nodes.get('Principled BSDF')",
-  "bsdf.inputs['Base Color'].default_value = (0.48,0.34,0.21,1); bsdf.inputs['Roughness'].default_value = 0.6",
-  '# adjust color/roughness to the material words in the task (oak/red/metal/glass)',
+  "bsdf.inputs['Base Color'].default_value = base_rgb + (1.0,); bsdf.inputs['Roughness'].default_value = 0.6",
   'for o in bpy.data.objects:',
   "    if o.type == 'MESH':",
   '        o.data.materials.clear(); o.data.materials.append(wood)',
@@ -159,6 +163,16 @@ CRITICAL — visual/spatial discipline:
 - Do the whole edit in ONE bpy_exec: create, shape, place, parent, apply (do not split one logical step across many calls that each assume a fresh scene).
 - VERIFY at the end: call verify/AABB or read the returned object list and CONFIRM counts/positions make sense (e.g. 4 legs, not 8; parts still connected/parented — nothing "dissected" into loose pieces).
 - Animation: to animate a running dog across 10 frames, rotate the same shoulder/hip bones or the LEG objects' rotation over time on one armature — do NOT create new armatures or pull existing ones apart. Set keyframes with bpy.context.scene.frame_set(f) + object.keyframe_insert(...).
+
+SHAPING & DETAIL (kill the flat/blocky look):
+- SHAPE with modifiers, not just primitives: bevel sharp edges (bevel modifier width ~0.02-0.05) and use SUBSURF/rounded cylinders for organic parts (bpy.ops.mesh.primitive_uv_sphere_add, then scale; add a SUBSURF modifier levels=1-2 for a smooth body/head).
+- For smooth organic objects (a dog, a character limb), make the base shape then add a Subdivision Surface modifier (bpy.ops.object.modifier_add(type='SUBSURF'); modifier.levels=2) so it is not a blocky box.
+- Faces/heads/limbs taper: use cones, stretched spheres, and beveled boxes, not plain cubes. A "leg"/"arm"/"beak"/"ear" is a shaped 3D body, never a bare box.
+- Group detail: once the silhouette is right, add distinguishing detail (eyes, ears, beak, wings, textures via modifier/sculpt) in the SAME or following prompt — not invisible.
+
+COLOR (apply the described colors — this must not be skipped):
+- When the prompt names any color/material (red, blue, green, gold, wood, pine, oak, metal), the FINALIZE material you apply MUST be that color. A "red cube" is RED. Use the named color map in the FINALIZE snippet and set base_rgb = named['<that word>'].
+- Do not default to a neutral gray when a color word is present — the gray auto-shade is only a fallback for when NO color was mentioned.
 
 CHARACTERS & COMPLEX MODELS (when the task is a named character, creature, or multi-part object):
 - Break it into NAMED, PARENTED parts you can refine later: e.g. "Torso", "Head", "L_UpperArm", "L_Forearm", "L_Hand", (mirror for R_...), "Pelvis", "L_Thigh", "L_Calf", "L_Foot". Parent each limb part to the part above it (forearm → upper arm; calf → thigh) and all to one root "Root".
