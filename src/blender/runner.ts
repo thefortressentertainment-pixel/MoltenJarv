@@ -121,6 +121,24 @@ export interface BlenderRunResult {
   local: boolean;
 }
 
+/** Verbatim shading/material finalize recipe the model is told to run last, so a
+ *  build is never left flat-gray. Plain string (Python single-quoted) to avoid
+ *  template-literal/backtick interaction. */
+const FINALIZE_SNIPPET = [
+  'import bpy',
+  "wood = bpy.data.materials.new('MAT_Pine'); wood.use_nodes = True",
+  "bsdf = wood.node_tree.nodes.get('Principled BSDF')",
+  "bsdf.inputs['Base Color'].default_value = (0.48,0.34,0.21,1); bsdf.inputs['Roughness'].default_value = 0.6",
+  '# adjust color/roughness to the material words in the task (oak/red/metal/glass)',
+  'for o in bpy.data.objects:',
+  "    if o.type == 'MESH':",
+  '        o.data.materials.clear(); o.data.materials.append(wood)',
+  "        bpy.context.view_layer.objects.active = o; bpy.ops.object.shade_smooth()",
+  "if not any(o.type == 'LIGHT' for o in bpy.data.objects):",
+  "    d = bpy.data.lights.new('Sun', type='SUN'); d.energy = 3.0",
+  "    o = bpy.data.objects.new('Sun', d); bpy.context.scene.collection.objects.link(o); o.rotation_euler = (0.785, 0, 0.5)",
+].join('\n');
+
 const BLENDER_SYSTEM = (today: string): string =>
   `You are Jarv, building 3D models in the user's OPEN Blender scene. Memory/CPU are limited; be terse but build visually coherent, recognizable objects — not symbolic placeholders.
 
@@ -134,9 +152,11 @@ CRITICAL — visual/spatial discipline:
 
 GENERAL:
 - REFERENCE IMAGE IS OPTIONAL, NOT REQUIRED. You do NOT need an image to build. By default, build from your OWN knowledge + the user's free-text description (e.g. "a sturdy pine workbench, thick top, 4 legs"). Use bpy_reference ONLY when the user explicitly gives an absolute image path (e.g. "/Users/.../wreath.jpg") or says "make it look like this picture" — then call it FIRST to extract proportions, then build with bpy_exec.
-- MATERIALS & SHADING: When the description names a color or material (pine, oak, red, metal, glass), ALWAYS create and assign a matching material via the bpy-material pattern (Principled BSDF). Even if not named, default to shading the finished model with a reasonable material + a light (SUN/AREA) so the result is not a flat gray primitive. A wood item = brown Principled with roughness ~0.6; name it MAT_Wood.
 - REAL 3D, not flat: a "leg"/"column"/"handle"/"stem" is a 3D body (cylinder/rounded column), NOT a flat plane. A bench leg is a squat cylinder or beveled box — never a 2D rectangle. Give parts thickness and proper X/Y/Z scale.
 - You already know what common things look like (wreath, dog, chair, table). Use that + the description; do not stall waiting for an image.
+- FINALIZE PASS (ALWAYS, at the end): run ONE bpy_exec that (1) assigns a material to every object, (2) adds a SUN light if none exists, (3) SMOOTH-SHADES the objects. Use THIS VERBATIM bpy (copy exactly):` +
+    '\n```\n' + FINALIZE_SNIPPET + '\n```' +
+    `\nAdjust the material color/roughness only to match material words in the task (oak, red, metal, glass).
 - Prefer low-level bpy (bpy.data.objects, matrix assignment) over bpy.ops when context is flaky.
 - Use bpy_exec for scene edits; file/run_shell only if a task truly needs a script file or external asset.
 - Stay on the ONE request. Reply concisely with the object names + materials created and the AABB/pose verification.
