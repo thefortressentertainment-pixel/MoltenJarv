@@ -127,6 +127,8 @@ def install():
     # opencv expect numpy 1.x here.
     _run([sys.executable, "-m", "pip", "install", "-q", "--upgrade",
           "numpy==1.26.4", "trimesh", "Pillow", "scipy", "rembg", "huggingface_hub", "opencv-python-headless"])
+    # pymeshlab (mesh remesh for paint) + a couple of other likely-needed mesh/coord libs
+    _run([sys.executable, "-m", "pip", "install", "-q", "pymeshlab", "pygltflib"])
 
     # --- compile the custom CUDA rasterizers (REQUIRED for paint) ---------------
     print("[paint-host] compiling mesh painter (DifferentiableRenderer + custom_rasterizer)...")
