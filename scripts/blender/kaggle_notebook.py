@@ -366,36 +366,50 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
             if os.path.isfile(_smu):
                 _src_code = open(_smu).read()
                 if "target_reduction" not in _src_code:
-                    import re as _re
-                    _patched = _src_code
-                    _patched = _patched.replace(
-                        "import pymeshlab",
-                        "import pymeshlab\nimport fast_simplification",
-                    )
-                    _patched = _patched.replace(
-                        "        courent = trimesh.load(outputpath.replace(\".glb\", \".obj\"), force=\"mesh\")\n"
-                        "    face_num = courent.faces.shape[0]\n"
+                    # fast_simplification re-implements trimesh.simplify_quadric_decimation so the
+                    # first positional arg is a *reduction RATIO* (0..1); Hunyuan passes an absolute
+                    # FACE COUNT (40000) -> fast_simplification._check_args raises
+                    # "``target_reduction`` must be between 0 and 1". Overwrite the whole helper with
+                    # a self-contained version wired to fast_simplification (no fragile string patch).
+                    _fixed = (
+                        "import trimesh\n"
+                        "import pymeshlab\n"
+                        "import fast_simplification\n"
                         "\n"
-                        "    if face_num > target_count:\n"
-                        "        courent = courent.simplify_quadric_decimation(target_count)\n",
-                        "        courent = trimesh.load(outputpath.replace(\".glb\", \".obj\"), force=\"mesh\")\n"
-                        "    face_num = courent.faces.shape[0]\n"
                         "\n"
+                        "def remesh_mesh(mesh_path, remesh_path):\n"
+                        "    mesh_simplify_trimesh(mesh_path, remesh_path)\n"
+                        "\n"
+                        "\n"
+                        "def mesh_simplify_trimesh(inputpath, outputpath, target_count=40000):\n"
+                        "    ms = pymeshlab.MeshSet()\n"
+                        "    if inputpath.endswith(\".glb\"):\n"
+                        "        ms.load_new_mesh(inputpath, load_in_a_single_layer=True)\n"
+                        "    else:\n"
+                        "        ms.load_new_mesh(inputpath)\n"
+                        "    ms.save_current_mesh(outputpath.replace(\".glb\", \".obj\"), save_textures=False)\n"
+                        "    courent = trimesh.load(outputpath.replace(\".glb\", \".obj\"), force=\"mesh\")\n"
+                        "    face_num = courent.faces.shape[0]\n"
                         "    if face_num > target_count:\n"
-                        "        # fast_simplification uses a reduction RATIO (0..1), not a\n"
-                        "        # face count. target_reduction = fraction of faces to REMOVE.\n"
+                        "        # fast_simplification uses a reduction RATIO (0..1), not a count.\n"
                         "        target_reduction = 1.0 - (float(target_count) / float(face_num))\n"
-                        "        _pts = courent.vertices.astype('float64')\n"
-                        "        _fcs = courent.faces\n"
-                        "        pts_o, fcs_o = fast_simplification.simplify(_pts, _fcs, target_reduction)\n"
-                        "        courent = trimesh.Trimesh(vertices=pts_o, faces=fcs_o, process=False)\n",
+                        "        pts_o, fcs_o = fast_simplification.simplify(\n"
+                        "            courent.vertices.astype(\"float64\"), courent.faces, target_reduction\n"
+                        "        )\n"
+                        "        courent = trimesh.Trimesh(vertices=pts_o, faces=fcs_o, process=False)\n"
+                        "    courent.export(outputpath)\n"
                     )
-                    open(_smu, "w").write(_patched)
-                    print("[paint-host] patched simplify_mesh_utils.py for fast_simplification ratio API")
+                    with open(_smu, "w") as _fh:
+                        _fh.write(_fixed)
+                    print("[paint-host] rewrote simplify_mesh_utils.py for fast_simplification ratio API")
             else:
                 print("[paint-host] WARN simplify_mesh_utils.py not found at", _smu)
         except Exception as exc:  # noqa: BLE001
             print(f"[paint-host] simplify_mesh_utils patch error: {exc}")
+        # Force a re-import of the (re)written module so a cached/older copy is never reused.
+        _sm_pkgs = ("textureGenPipeline", "utils.simplify_mesh_utils", "simplify_mesh_utils")
+        for _sp in _sm_pkgs:
+            sys.modules.pop(_sp, None)
         from textureGenPipeline import Hunyuan3DPaintConfig, Hunyuan3DPaintPipeline
         _JOBS[job_id]["status"] = "running"
         config = Hunyuan3DPaintConfig(max_num_view=MAX_NUM_VIEW, resolution=RESOLUTION)
