@@ -358,8 +358,8 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
                                 _img_arr = _mu_np.repeat(_img_arr, 3, axis=-1)
                             if _img_arr.shape[-1] >= 3:
                                 _img_arr = _img_arr[..., :3]
-                            _pil_from = __import__("PIL.Image", fromlist=["Image"]).Image
-                            _pil_img = _pil_from.fromarray(_img_arr[:, :, ::-1].copy())  # BGR->RGB
+                            from PIL.Image import fromarray as _pil_fromarray
+                            _pil_img = _pil_fromarray(_img_arr[:, :, ::-1].copy())  # BGR->RGB
                             from trimesh.visual.material import PBRMaterial
                             _mat = PBRMaterial(baseColorTexture=_pil_img)
                             from trimesh.visual.texture import TextureVisuals
