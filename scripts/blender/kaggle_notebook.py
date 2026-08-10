@@ -290,13 +290,14 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
         try:
             import sys as _mu, types as _types
             import numpy as _mu_np
+            import trimesh as _mu_trimesh
             if "DifferentiableRenderer.mesh_utils" not in _mu.modules or getattr(
                     _mu.modules.get("DifferentiableRenderer.mesh_utils"), "_jarv_real", False) is False:
                 def _noop(*a, **k):
                     return None
 
                 def _jum_load_mesh(mesh):
-                    m = trimesh.load(mesh, force="mesh") if isinstance(mesh, (str, bytes)) else mesh
+                    m = _mu_trimesh.load(mesh, force="mesh") if isinstance(mesh, (str, bytes)) else mesh
                     vtx_pos = _mu_np.asarray(m.vertices, dtype=_mu_np.float32)
                     pos_idx = _mu_np.asarray(m.faces, dtype=_mu_np.int32)
                     try:
@@ -315,7 +316,7 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
                     pos_idx = _as(pos_idx, _mu_np.int32)
                     vtx_uv = _as(vtx_uv, _mu_np.float32)
                     uv_idx = _as(uv_idx, _mu_np.int32)
-                    mesh = trimesh.Trimesh(vertices=vtx_pos, faces=pos_idx, process=False)
+                    mesh = _mu_trimesh.Trimesh(vertices=vtx_pos, faces=pos_idx, process=False)
                     if vtx_uv is not None and uv_idx is not None:
                         try:
                             mesh.visual.uv = vtx_uv
