@@ -84,7 +84,10 @@ def main():
     #    setup.sh creates a conda env which is awkward on Kaggle; do a pip subset instead.
     pip = [sys.executable, "-m", "pip", "install", "-q"]
     base_reqs = [
-        "torch==2.4.0", "torchvision", "torchaudio",
+        # torch AND torchvision/torchaudio must match exactly (2.4.0 <-> 0.19.0)
+        # on the cu121 index. Unpinned torchvision pulls a newer one whose CUDA
+        # ops (e.g. torchvision::nms) don't exist in torch 2.4 -> import crash.
+        "torch==2.4.0", "torchvision==0.19.0", "torchaudio==2.4.0",
         "--index-url", "https://download.pytorch.org/whl/cu121",
     ]
     other = [
