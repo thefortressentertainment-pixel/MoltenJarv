@@ -122,8 +122,11 @@ def install():
     _run([sys.executable, "-m", "pip", "install", "-q", "-r", "requirements.txt"])
     # Explicit runtime deps the paint pipeline needs at import time (trimesh handles
     # mesh load/save/export; the source repo's requirements may not pin these).
-    _run([sys.executable, "-m", "pip", "install", "-q",
-          "trimesh", "numpy", "Pillow", "scipy", "rembg", "huggingface_hub"])
+    # PIN numpy<=1.26 — numpy 2.x + various deps throws
+    # '_multiarray_umath has no attribute _blas_supports_fpe'; torch 2.5 + rembg/
+    # opencv expect numpy 1.x here.
+    _run([sys.executable, "-m", "pip", "install", "-q", "--upgrade",
+          "numpy==1.26.4", "trimesh", "Pillow", "scipy", "rembg", "huggingface_hub", "opencv-python-headless"])
 
     # --- compile the custom CUDA rasterizers (REQUIRED for paint) ---------------
     print("[paint-host] compiling mesh painter (DifferentiableRenderer + custom_rasterizer)...")
