@@ -133,7 +133,7 @@ def install():
     # '_multiarray_umath has no attribute _blas_supports_fpe'; torch 2.5 + rembg/
     # opencv expect numpy 1.x here.
     _run([sys.executable, "-m", "pip", "install", "-q", "--upgrade",
-          "numpy==1.26.4", "trimesh", "Pillow", "scipy", "rembg", "huggingface_hub"])
+          "numpy==1.26.4", "trimesh", "Pillow", "scipy==1.13.1", "rembg", "huggingface_hub"])
     # pymeshlab (mesh remesh for paint) + UV unwrap (xatlas) + misc
     _run([sys.executable, "-m", "pip", "install", "-q",
           "pymeshlab", "pygltflib", "opencv-python-headless", "xatlas", "open3d", "onnxruntime",
@@ -251,6 +251,33 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
             import sys as _tvs, torchvision, torchvision.transforms.functional as _fn
             _tvs.modules.setdefault("torchvision.transforms.functional_tensor", _fn)
             _tvs.modules.setdefault("torchvision.transforms.functional_pil", _fn)
+        except Exception:  # noqa: BLE001
+            pass
+        # scipy >= 1.14 (and the pyPI array-api-compat it pulls) imports
+        # `scipy._lib.array_api_compat` at import time, and its numpy shim does a
+        # star-import of numpy into a fresh namespace (clone_module)
+        # which infinite-recurses against numpy 1.26 (see RecursionError deep in
+        # numpy/__init__.__getattr__ when trimesh -> scipy.spatial loads). Importing
+        # scipy is unavoidable (trimesh needs ConvexHull), so pre-stand up a safe
+        # scipy._lib.array_api_compat in sys.modules BEFORE any scipy import: it only
+        # needs the attrs scipy/_lib/_array_api.py reads (is_array_api_obj, size,
+        # .numpy). SCIPY_ARRAY_API defaults off, so array_namespace returns np_compat
+        # and the stubbed functions are effectively never exercised for the paint path.
+        try:
+            import sys as _sac, types as _sac_t
+            if "scipy._lib.array_api_compat" not in _sac.modules:
+                import numpy as _np
+                _sac_ns = _sac_t.ModuleType("scipy._lib.array_api_compat")
+                _sac_ns.is_array_api_obj = lambda obj: hasattr(obj, "__array_namespace__")
+                _sac_ns.size = lambda x, axis=None: _np.size(x, axis=axis)
+                _sac_ns.numpy = _np
+                # scipy may import submodules like scipy._lib.array_api_compat.numpy
+                # or `common`; point them at harmless aliases too.
+                _sac_np_alias = _sac_t.ModuleType("scipy._lib.array_api_compat.numpy")
+                _sac_np_alias.__dict__.update({k: getattr(_np, k) for k in ("array_namespace", "linalg", "fft")
+                                               if hasattr(_np, k)})
+                _sac.modules["scipy._lib.array_api_compat"] = _sac_ns
+                _sac.modules["scipy._lib.array_api_compat.numpy"] = _sac_np_alias
         except Exception:  # noqa: BLE001
             pass
         # textureGenPipeline does `from DifferentiableRenderer.mesh_utils import
