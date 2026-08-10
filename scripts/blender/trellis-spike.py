@@ -105,7 +105,7 @@ def main():
     print("pip torch rc", r.returncode, r.stderr[-800:], flush=True)
     r = sh(
         _pip + " einops imageio imageio-ffmpeg matplotlib ninja numpy pillow scipy tqdm trimesh ipywidgets"
-        + " 'xformers==0.0.27' 'rembg' 'onnxruntime' 'opencv-python-headless'",
+        + " 'xformers==0.0.27' 'rembg' 'onnxruntime' 'opencv-python-headless' 'open3d'",
         timeout=2400,
     )
     print("pip deps rc", r.returncode, r.stderr[-800:], flush=True)
