@@ -136,3 +136,11 @@ installs ~15 min).
        Verify with the job's `[paint-host] save_mesh TEXTURE:` line that texture is non-None
        and the `[paint-host] save_mesh attached painted texture <WxH> uv=<N,2>` + the
        `save_mesh GLB gate: material=True texcoord=True` lines.
+
+== RESOLVED (2026-08-10): the full chain now ships a TEXTURED GLB ==
+After fixing `from PIL.Image import fromarray` (wall 10), /tmp/jarv_painted.glb
+comes back with materials:1 textures:1 images:1 and primitive attrs
+POSITION,TEXCOORD_0 (4.3MB vs 776KB unpainted). Verify the GLB bytes, not the
+job's "remote-painted GLB" string. Successful run confirms the 3 checks that must
+all be True in the cell: `save_mesh TEXTURE: <shape>`, `save_mesh attached painted
+texture <WxH> uv=<N,2>`, and `save_mesh GLB gate: material=True texcoord=True`.
