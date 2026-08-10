@@ -76,6 +76,32 @@ function authHeaders(cfg: PaintRemoteConfig): Record<string, string> {
   return h;
 }
 
+const CLOUDFLARE_BLIPS = new Set([530, 502, 503, 504]);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** fetch() that retries transient Cloudflare/tunnel errors (530/502/503/504) and
+ *  network resets, with a short backoff. trycloudflare drops connections
+ *  intermittently (HTTP 530 'origin unreachable' blips) right after requests. */
+async function fetchRetry(url: string, init: RequestInit, tries = 3): Promise<Response> {
+  let last: Error | Response | undefined;
+  for (let i = 0; i < tries; i++) {
+    try {
+      const res = await fetch(url, init);
+      if (!res.ok && CLOUDFLARE_BLIPS.has(res.status) && i < tries - 1) {
+        last = res;
+        await sleep(3000 * (i + 1));
+        continue;
+      }
+      return res;
+    } catch (err) {
+      last = err as Error;
+      if (i < tries - 1) await sleep(3000 * (i + 1));
+    }
+  }
+  if (last instanceof Response) throw new Error(`HTTP ${last.status}`);
+  throw last ?? new Error('fetch failed');
+}
+
 /** Multipart upload of the mesh GLB + reference to the remote paint service.
  *  Remote returns the key under which it stored the job. */
 async function uploadJob(cfg: PaintRemoteConfig, glb: string, reference: string): Promise<string> {
@@ -95,11 +121,11 @@ async function uploadJob(cfg: PaintRemoteConfig, glb: string, reference: string)
   parts.push(Buffer.from(`--${boundary}--\r\n`));
   const body = Buffer.concat(parts);
 
-  const res = await fetch(`${cfg.endpoint.replace(/\/+$/, '')}/jobs`, {
+  const res = await fetchRetry(`${cfg.endpoint.replace(/\/+$/, '')}/jobs`, {
     method: 'POST',
     headers: { ...authHeaders(cfg), 'Content-Type': `multipart/form-data; boundary=${boundary}` },
     body,
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(180_000),
   });
   const data = (await res.json().catch(() => ({}))) as { job_id?: string; error?: string };
   if (!res.ok) throw new Error(data.error || `upload HTTP ${res.status}`);
@@ -112,7 +138,7 @@ async function waitForJob(cfg: PaintRemoteConfig, jobId: string, timeoutMs = 30 
   const base = cfg.endpoint.replace(/\/+$/, '');
   const started = Date.now();
   for (;;) {
-    const res = await fetch(`${base}/jobs/${jobId}`, { headers: authHeaders(cfg), signal: AbortSignal.timeout(30_000) });
+    const res = await fetchRetry(`${base}/jobs/${jobId}`, { headers: authHeaders(cfg), signal: AbortSignal.timeout(30_000) });
     const data = (await res.json().catch(() => ({}))) as { status?: string; error?: string };
     const status = data.status || 'running';
     if (status === 'done' || status === 'failed') return { status, error: data.error };
@@ -123,7 +149,7 @@ async function waitForJob(cfg: PaintRemoteConfig, jobId: string, timeoutMs = 30 
 
 /** Download the painted textured GLB back to a local path. */
 async function downloadResult(cfg: PaintRemoteConfig, jobId: string, dest: string): Promise<string> {
-  const res = await fetch(`${cfg.endpoint.replace(/\/+$/, '')}/jobs/${jobId}/result`, {
+  const res = await fetchRetry(`${cfg.endpoint.replace(/\/+$/, '')}/jobs/${jobId}/result`, {
     headers: authHeaders(cfg),
     signal: AbortSignal.timeout(180_000),
   });
