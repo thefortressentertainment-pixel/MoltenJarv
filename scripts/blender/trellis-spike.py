@@ -37,6 +37,7 @@ def log_gpu(tag):
 
 def main():
     log_gpu("start")
+    print(f"[trellis] interpreter: {sys.version.split()[0]} at {sys.executable}", flush=True)
 
     # Reference image. On Kaggle, upload the file (left panel "+ Add Input" -> Upload,
     # or add a Dataset) so it lands at /kaggle/input/<name>/3D-wizard.jpeg, then point
@@ -83,22 +84,31 @@ def main():
     # 3. Install deps in the CURRENT interpreter (Kaggle already has torch/CUDA).
     #    setup.sh creates a conda env which is awkward on Kaggle; do a pip subset instead.
     pip = [sys.executable, "-m", "pip", "install", "-q"]
-    base_reqs = [
-        # torch AND torchvision/torchaudio must match exactly (2.4.0 <-> 0.19.0)
-        # on the cu121 index. Unpinned torchvision pulls a newer one whose CUDA
-        # ops (e.g. torchvision::nms) don't exist in torch 2.4 -> import crash.
-        "torch==2.4.0", "torchvision==0.19.0", "torchaudio==2.4.0",
-        "--index-url", "https://download.pytorch.org/whl/cu121",
-    ]
-    other = [
-        "einops", "imageio", "imageio-ffmpeg", "matplotlib", "ninja",
-        "numpy", "pillow", "scipy", "tqdm", "trimesh", "ipywidgets",
-        "xformers",
-    ]
+
     print("[trellis] installing base torch + deps (this can be slow)", flush=True)
-    for group in (base_reqs, other):
-        r = sh(f"{sys.executable} -m pip install -q " + " ".join(group), timeout=1800)
-        print("pip rc", r.returncode, r.stderr[-800:], flush=True)
+    # ONE resolve with --force-reinstall so pip actually downgrades from a stray
+    # newer torch (2.13) that a prior split install left behind. torch/torchvision/
+    # torchaudio must match exactly (2.4.0 <-> 0.19.0 <-> 2.4.0); use xformers 0.0.27
+    # which supports torch 2.4 (0.0.35 needs torch>=2.10 and re-bumps torch). Installing
+    # them all together prevents the xformers->torch upgrade from re-breaking the pair.
+    _pip = f"{sys.executable} -m pip install --force-reinstall -q"
+    r = sh(
+        _pip
+        + " torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0"
+        + " --index-url https://download.pytorch.org/whl/cu121",
+        timeout=1800,
+    )
+    print("pip torch rc", r.returncode, r.stderr[-800:], flush=True)
+    r = sh(
+        _pip
+        + " einops imageio imageio-ffmpeg matplotlib ninja numpy pillow scipy tqdm trimesh ipywidgets"
+        + " 'xformers==0.0.27'",
+        timeout=1800,
+    )
+    print("pip deps rc", r.returncode, r.stderr[-800:], flush=True)
+    # sanity: print what's actually importable so we catch a stale torch before the model loads
+    r = sh(f"{sys.executable} -c 'import torch, torchvision; print(\"torch\", torch.__version__, \"tv\", torchvision.__version__)'")
+    print(r.stdout, r.stderr[-400:], flush=True)
 
     # build the local submodules that have wheels / are light; catch failures non-fatally
     for sub in ["diffoctreerast", "spconv", "kaolin", "nvdiffrast", "mipgaussian"]:
