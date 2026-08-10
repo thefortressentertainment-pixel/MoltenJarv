@@ -107,15 +107,15 @@ async function uploadJob(cfg: PaintRemoteConfig, glb: string, reference: string)
   return data.job_id;
 }
 
-/** Poll the remote paint job until done or timeout. Returns job status. */
-async function waitForJob(cfg: PaintRemoteConfig, jobId: string, timeoutMs = 30 * 60_000): Promise<{ status: string }> {
+/** Poll the remote paint job until done or timeout. Returns status + remote error. */
+async function waitForJob(cfg: PaintRemoteConfig, jobId: string, timeoutMs = 30 * 60_000): Promise<{ status: string; error?: string }> {
   const base = cfg.endpoint.replace(/\/+$/, '');
   const started = Date.now();
   for (;;) {
     const res = await fetch(`${base}/jobs/${jobId}`, { headers: authHeaders(cfg), signal: AbortSignal.timeout(30_000) });
-    const data = (await res.json().catch(() => ({}))) as { status?: string };
+    const data = (await res.json().catch(() => ({}))) as { status?: string; error?: string };
     const status = data.status || 'running';
-    if (status === 'done' || status === 'failed') return { status };
+    if (status === 'done' || status === 'failed') return { status, error: data.error };
     if (Date.now() - started > timeoutMs) return { status: 'timeout' };
     await new Promise((r) => setTimeout(r, 5000));
   }
@@ -145,9 +145,9 @@ export async function runRemotePaint(
   if (!fs.existsSync(reference)) return { ok: false, error: `reference not found: ${reference}` };
   try {
     const jobId = await uploadJob(cfg, glb, reference);
-    const { status } = await waitForJob(cfg, jobId);
-    if (status === 'failed') return { ok: false, error: 'remote paint job failed' };
-    if (status === 'timeout') return { ok: false, error: 'remote paint timed out (30m)' };
+    const status = await waitForJob(cfg, jobId);
+    if (status.status === 'failed') return { ok: false, error: `remote paint job failed: ${status.error || 'unknown error on the GPU host'}` };
+    if (status.status === 'timeout') return { ok: false, error: 'remote paint timed out (30m)' };
     const dest = await downloadResult(cfg, jobId, out);
     return { ok: true, glb: dest };
   } catch (err) {

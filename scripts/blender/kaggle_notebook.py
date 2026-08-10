@@ -86,6 +86,15 @@ def install():
 
 
 # ------------------------- paint execution ------------------------------------
+def _gpu_count():
+    """Number of CUDA-visible GPUs (0 if torch absent/CPU)."""
+    try:
+        import torch
+        return torch.cuda.device_count() if torch.cuda.is_available() else 0
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 def _run_paint(job_id, mesh_path, ref_path, out_path):
     try:
         sys.path.insert(0, HUNYUAN_DIR)
@@ -94,18 +103,28 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
         _JOBS[job_id]["status"] = "running"
         config = Hunyuan3DPaintConfig(max_num_view=MAX_NUM_VIEW, resolution=RESOLUTION)
         paint = Hunyuan3DPaintPipeline(config)
-        if LOW_VRAM:
+        # Auto low-VRAM: half-cast models if LOW_VRAM OR a single GPU (paint wants ~21GB)
+        use_low = LOW_VRAM or (_gpu_count() < 2)
+        if use_low:
+            _JOBS[job_id]["status"] = "running(low-vram)"
             try:
                 for name in list(paint.models):
-                    paint.models[name] = getattr(paint.models[name], "half", lambda: paint.models[name])()
-            except Exception:
-                pass
+                    try:
+                        paint.models[name] = paint.models[name].half()
+                    except Exception:
+                        pass
+            except Exception as exc:  # noqa: BLE001
+                print(f"[paint-host] low-vram cast warning: {exc}")
         paint(mesh_path=mesh_path, image_path=ref_path, output_mesh_path=out_path, save_glb=True)
         _JOBS[job_id]["status"] = "done"
         _JOBS[job_id]["out"] = out_path
     except Exception as exc:  # noqa: BLE001
+        import traceback
         _JOBS[job_id]["status"] = "failed"
         _JOBS[job_id]["error"] = str(exc)
+        print("[paint-host] PAINT JOB FAILED:")
+        traceback.print_exc()
+        print("---- end paint error ----")
 
 
 # ------------------------- tiny HTTP server ------------------------------------
@@ -186,7 +205,12 @@ class _H(BaseHTTPRequestHandler):
             m = re.match(r"^/jobs/([^/]+)$", self.path)
             if m:
                 j = _JOBS.get(m.group(1))
-                return self._send(404, {"error": "no such job"}) if j is None else self._send(200, {"status": j["status"]})
+                if j is None:
+                    return self._send(404, {"error": "no such job"})
+                resp = {"status": j["status"]}
+                if j.get("error"):
+                    resp["error"] = j["error"]
+                return self._send(200, resp)
             m2 = re.match(r"^/jobs/([^/]+)/result$", self.path)
             if m2:
                 j = _JOBS.get(m2.group(1))
