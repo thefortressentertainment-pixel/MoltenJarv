@@ -384,6 +384,18 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
             print(f"[paint-host] bpy stub error: {exc}")
         sys.path.insert(0, HUNYUAN_DIR)
         sys.path.insert(0, os.path.join(HUNYUAN_DIR, "hy3dpaint"))
+        # The CUDA rasterizer builds `custom_rasterizer_kernel*.so` in
+        # hy3dpaint/custom_rasterizer/custom_rasterizer/. `import custom_rasterizer`
+        # (used by MeshRender) otherwise resolves to the repo-root namespace folder
+        # (no __init__/render.py -> no rasterize/interpolate), and render.py needs
+        # the kernel .so on the path. Put both on sys.path explicitly.
+        _cr_root = os.path.join(HUNYUAN_DIR, "hy3dpaint", "custom_rasterizer")
+        _cr_pkg = os.path.join(_cr_root, "custom_rasterizer")
+        for _crp in (_cr_pkg, _cr_root):
+            if _crp not in sys.path:
+                sys.path.insert(0, _crp)
+        sys.modules.pop("custom_rasterizer", None)
+        sys.modules.pop("custom_rasterizer_kernel", None)
         # The paint resolves resources/relative to the REPO ROOT: it wants
         #   <root>/hy3dpaint/cfgs/xxx.yaml  and  <root>/ckpt/RealESRGAN_x4plus.pth
         # chdir to HUNYUAN_DIR (repo root) and expose ckpt there (from hy3dpaint/ckpt).
