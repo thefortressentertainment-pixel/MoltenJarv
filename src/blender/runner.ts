@@ -43,10 +43,15 @@ const BLENDER_TOOL_NAMES = new Set<string>([
   'bpy_import_craft',
   'bpy_reference',
   'bpy_render_report',
+  'bpy_compare',
   'file_read', 'file_write', 'file_list', 'file_delete',
   'web_search', 'web_read',
   'screen_capture',
 ]);
+
+/** Module-level last-known reference path (set by runBlenderTask from the prompt),
+ *  so bpy_compare can auto-target the current reference without being passed args. */
+let lastReferencePath: string | undefined;
 
 /** Read the live Blender bridge state. The add-on writes `blender-state.json`,
  *  but that file can go stale (e.g. after a hub bounce or a Blender reopen) while
@@ -500,6 +505,7 @@ CHARACTERS & COMPLEX MODELS (when the task is a named character, creature, or mu
 
 REFINE-TO-DETAIL (stop producing clustered geometric shapes — close the loop with feedback):
 - After building the base, call bpy_render_report to RENDER your current work to a PNG and get a VISION description of what you actually built (e.g. "a green sphere torso, two boxy gray legs, no head"). Use that description to SEE your result instead of assuming.
+- When a reference image is present, call bpy_compare to SCAN + COMPARE: it renders your model, re-reads the reference, and returns both descriptions plus the single most-different part. Fix THAT one part by name, then re-render. Run this compare→fix→render loop up to ~3 times for a "make it 1:1"/"refine" request.
 - Then compare what you SEE against the task/reference and make ONE targeted correction to the specific named part that is wrong (e.g. the report says "no head" → create/add the Head part; "legs are boxes" → reshape them with bevel/subsurf). Edit that ONE part by name — do not rebuild the whole scene.
 - Repeat the render → assess → correct loop up to ~3 times when a prompt asks to 'fine tune' or 'refine', each time fixing the single most-wrong detail.
 - If a reference image is available (bpy_reference gave a spec), compare the rendered result's proportions/colors against that spec and adjust named parts to match.
@@ -626,6 +632,73 @@ export async function renderLiveScenePNG(outPath = '/tmp/jarv_blender_report.png
   }
 }
 
+/** Assess the current build against the reference (if any): render the live mesh,
+ *  describe both the render and the reference with local vision, and return a
+ *  comparison note so Jarv can correct the single most-wrong part toward 1:1.
+ *  RAM-light (reuses local vision). Renders in the already-open Blender. */
+export async function assessAgainstReference(config: JarvGenieConfig, referenceImage?: string): Promise<{
+  ok: boolean;
+  renderDesc?: string;
+  referenceDesc?: string;
+  gap?: string;
+  error?: string;
+}> {
+  const shot = await renderLiveScenePNG();
+  if (!shot.ok) return { ok: false, error: shot.error ?? 'render failed' };
+  try {
+    const { describeImage } = await import('../computer/index.js');
+    const comp = (config as unknown as { computer?: { visionModel?: string } }).computer ?? {};
+    const model = comp.visionModel;
+    const renderDesc = await describeImage(shot.path, config, {
+      model,
+      question: 'Describe this 3D model render: overall shape, parts present (head/body/limbs/ears?), their proportions and colors, and what is MISSING, blocky, or wrong. Be specific and honest.',
+    }).then((d) => d.slice(0, 1200));
+    let referenceDesc = '';
+    let gap = '';
+    if (referenceImage) {
+      try {
+        referenceDesc = await describeImage(referenceImage, config, {
+          model,
+          question: 'Describe this reference image: overall silhouette, main parts and their proportions, colors, pose. Be specific.',
+        }).then((d) => d.slice(0, 1200));
+        gap = 'Compare your rendered model to the reference. Identify the SINGLE most-different part (a limb wrong, head too small, wrong color, missing feature) and edit THAT by name. Do not rebuild the whole figure; do not add unrelated detail.';
+      } catch {
+        gap = 'Reference could not be re-read; correct the single most-wrong part of the render by name.';
+      }
+    }
+    return { ok: true, renderDesc, referenceDesc, gap: gap || 'Correct the single most-wrong part by name, then re-render.' };
+  } catch (err) {
+    return { ok: false, error: `vision assessment failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
+/** A bpy_compare tool: render the current model and (if a reference path is passed
+ *  or present) read the reference, returning BOTH vision descriptions + the single
+ *  most-different part to fix toward 1:1. RAM-light (local vision, render in open Blender). */
+function bpyCompareTool(config: JarvGenieConfig): ToolDefinition {
+  return {
+    name: 'bpy_compare',
+    system: 'sense',
+    description:
+      'SCAN + COMPARE toward 1:1. Renders your current model, re-reads the reference image (pass its absolute path in reference, or it is taken from the prompt), and returns a vision description of BOTH plus the single most-different part to fix. Use this to compare what you built against the reference (e.g. "the arms are too long vs the picture") and make ONE targeted edit by name — then re-render to verify. RAM-light: reuses local vision.',
+    inputSchema: {
+      type: 'object',
+      properties: { reference: { type: 'string', description: 'Optional absolute path to the reference image.' } },
+    },
+    handler: async (args) => {
+      const reference = String(args.reference ?? '').trim() || lastReferencePath;
+      const ass = await assessAgainstReference(config, reference);
+      if (!ass.ok) return { ok: false, error: ass.error ?? 'compare failed' };
+      return {
+        ok: true,
+        render: ass.renderDesc,
+        reference: ass.referenceDesc,
+        note: ass.gap,
+      };
+    },
+  };
+}
+
 /** A bpy_render_report tool: renders the current Blender build to a PNG and gets
  *  a vision description of what Jarv ACTUALLY built, so it can see (not assume)
  *  its work and correct the specific wrong part. RAM-light (reuses local vision). */
@@ -637,19 +710,9 @@ function bpyRenderReportTool(config: JarvGenieConfig): ToolDefinition {
       'Render a viewport still of the current Blender scene and describe it with local vision. Use AFTER building to SEE your actual result (e.g. "a green sphere torso, two boxy gray legs, no head") so you can correct exactly the part that is wrong instead of guessing. Triggers a render + calls the local vision model; returns the vision description of your own work.',
     inputSchema: { type: 'object', properties: {} },
     handler: async () => {
-      const shot = await renderLiveScenePNG();
-      if (!shot.ok) return { ok: false, error: shot.error ?? 'render report failed' };
-      try {
-        const { describeImage } = await import('../computer/index.js');
-        const comp = (config as unknown as { computer?: { visionModel?: string } }).computer ?? {};
-        const desc = await describeImage(shot.path, config, {
-          model: comp.visionModel,
-          question: 'Describe this 3D model you just built: what is the overall shape, what parts are present (head/body/limbs/ears?), their proportions and colors, and what is MISSING or blocky. Be specific and honest.',
-        });
-        return { ok: true, description: desc.slice(0, 1200), note: 'Use this to correct the single most-wrong part by name, then re-render to verify.' };
-      } catch (err) {
-        return { ok: false, error: `vision description failed: ${err instanceof Error ? err.message : String(err)} — proceed with your best judgment` };
-      }
+      const ass = await assessAgainstReference(config);
+      if (!ass.ok) return { ok: false, error: ass.error ?? 'render report failed' };
+      return { ok: true, description: ass.renderDesc, note: ass.gap };
     },
   };
 }
@@ -668,6 +731,7 @@ export function blenderToolRegistry(config: JarvGenieConfig): ToolRegistry {
     bpyImportCraftTool(config),
     bpyReferenceTool(config),
     bpyRenderReportTool(config),
+    bpyCompareTool(config),
   ];
   const scoped = all.filter((t) => BLENDER_TOOL_NAMES.has(t.name));
   registry.registerMany(scoped);
@@ -757,6 +821,7 @@ export async function runBlenderTask(config: JarvGenieConfig, input: BlenderRunI
   // shape-spec hint, so the text model is never expected to decode an image it
   // can't see (DeepSeek rejects image input with "does not support image input").
   const referenceHint = await referenceHintFor(config, input.message);
+  lastReferencePath = extractAbsoluteImagePath(input.message) || undefined;
   const userMessage = [input.message, referenceHint, snapshotHint, projectHint].filter(Boolean).join('\n');
   const messages: ChatMessage[] = [
     { role: 'system', content: BLENDER_SYSTEM(today) },
