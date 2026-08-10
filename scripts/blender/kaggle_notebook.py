@@ -129,6 +129,9 @@ def install():
           "numpy==1.26.4", "trimesh", "Pillow", "scipy", "rembg", "huggingface_hub", "opencv-python-headless"])
     # pymeshlab (mesh remesh for paint) + a couple of other likely-needed mesh/coord libs
     _run([sys.executable, "-m", "pip", "install", "-q", "pymeshlab", "pygltflib"])
+    # RE-PIN numpy LAST: a later dep (pymeshlab/scipy/opencv) can bump numpy to 2.2+,
+    # which REMOVES numpy.char and breaks diffusers (No module named 'numpy.char').
+    _run([sys.executable, "-m", "pip", "install", "-q", "numpy==1.26.4"])
 
     # --- compile the custom CUDA rasterizers (REQUIRED for paint) ---------------
     print("[paint-host] compiling mesh painter (DifferentiableRenderer + custom_rasterizer)...")
@@ -193,6 +196,15 @@ def _gpu_count():
 
 def _run_paint(job_id, mesh_path, ref_path, out_path):
     try:
+        # Self-heal numpy: if a session dep bumped numpy to 2.2+, diffusers fails
+        # with 'No module named numpy.char'. Force back to <2.2 (has numpy.char).
+        try:
+            import numpy
+            if not hasattr(numpy, "char") or "char" not in dir(numpy):
+                import subprocess as _sp, sys as _sys
+                _sp.run([_sys.executable, "-m", "pip", "install", "-q", "numpy==1.26.4"], check=False)
+        except Exception:  # noqa: BLE001
+            pass
         sys.path.insert(0, HUNYUAN_DIR)
         sys.path.insert(0, os.path.join(HUNYUAN_DIR, "hy3dpaint"))
         from textureGenPipeline import Hunyuan3DPaintConfig, Hunyuan3DPaintPipeline
