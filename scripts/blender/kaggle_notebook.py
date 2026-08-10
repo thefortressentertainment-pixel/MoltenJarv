@@ -212,11 +212,26 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
             import sys as _sys
             # numpy 2.x renamed numpy.char -> numpy.strings and numpy.rec -> numpy.recarray;
             # diffusers imports both. Alias so the imports work on any numpy version.
+            # numpy.strings only exists on 2.x; numpy.char only on 1.x. Diffusers >=0.31
+            # does BOTH `import numpy.char` AND `import numpy.strings` depending on the
+            # installed numpy. Make both import paths resolve on either version.
+            import types as _nx_types
             try:
                 import numpy.strings as _strings
                 _sys.modules.setdefault("numpy.char", _strings)
             except Exception:  # noqa: BLE001
-                pass
+                # numpy 1.x: no numpy.strings submodule; diffusers imports it directly,
+                # so synthesize numpy.strings backed by numpy.char.
+                try:
+                    import numpy.char as _char
+                    _nx_strings = _nx_types.ModuleType("numpy.strings")
+                    _nx_strings.__dict__.update(
+                        {k: getattr(_char, k) for k in dir(_char) if not k.startswith("__")})
+                    _nx_strings.add = _char.add
+                    _sys.modules["numpy.strings"] = _nx_strings
+                    setattr(numpy, "strings", _nx_strings)
+                except Exception:  # noqa: BLE001
+                    pass
             try:
                 import numpy.recarray
                 _sys.modules.setdefault("numpy.rec", numpy.recarray)
@@ -348,7 +363,7 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
     except Exception as exc:  # noqa: BLE001
         import traceback
         _JOBS[job_id]["status"] = "failed"
-        _JOBS[job_id]["error"] = str(exc)
+        _JOBS[job_id]["error"] = "\n".join((str(exc), traceback.format_exc()))
         print("[paint-host] PAINT JOB FAILED:")
         traceback.print_exc()
         print("---- end paint error ----")
