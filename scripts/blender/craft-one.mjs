@@ -225,6 +225,13 @@ print('CLEAN_OK', len(mesh.data.vertices))
 /** Headless mesh-sharpen pass: import the GLB, smooth + subsurf-up + clean, and
  *  re-export. Each round raises surface fidelity (round = subsurf levels). RAM-safe
  *  (spawn-and-exit; Blender must be closed). */
+/** Headless mesh-sharpen pass, designed to be FAST and never blow up memory/time.
+ *  Imports the GLB, and:
+ *   - dense mesh (>=120k verts): smooth ONLY (no subsurf — subdividing a dense
+ *     mesh on the 8GB M1 explodes RAM and times out, which is why auto-refine
+ *     "did nothing" before). Fast.
+ *   - lighter mesh: smooth + modest subsurf-up (levels from round), which is cheap.
+ *  Re-exports in place. RAM-safe; hard timeout so it can never hang. */
 async function refineMeshSync(glb, round) {
   const blender = '/Applications/Blender.app/Contents/MacOS/Blender';
   if (!fs.existsSync(blender)) return { ok: false, error: 'Blender not found' };
@@ -235,22 +242,30 @@ meshes=[o for o in bpy.data.objects if o.type=='MESH']
 if not meshes: raise SystemExit('NO_MESH')
 mesh=meshes[-1]
 bpy.ops.object.select_all(action='DESELECT'); mesh.select_set(True); bpy.context.view_layer.objects.active=mesh
-# smooth the surface, then subsurf UP for a finer cage, then decimate-clean to keep RAM sane
+nv=len(mesh.data.vertices)
 bpy.ops.object.shade_smooth()
-bpy.ops.object.modifier_add(type='SMOOTH'); bpy.context.object.modifiers[-1].factor=0.6
-bpy.ops.object.modifier_apply(modifier=bpy.context.object.modifiers[-1].name)
-bpy.ops.object.modifier_add(type='SUBSURF'); bpy.context.object.modifiers[-1].levels=${round}
-bpy.ops.object.modifier_apply(modifier=bpy.context.object.modifiers[-1].name)
-# re-smooth to remove faceting from the raised octree cage
+# fast smooth always (cheap, improves surface by removing heavy faceting)
 bpy.ops.object.modifier_add(type='SMOOTH'); bpy.context.object.modifiers[-1].factor=0.5
 bpy.ops.object.modifier_apply(modifier=bpy.context.object.modifiers[-1].name)
+done='smooth'
+if nv < 120000:
+    # modest subsurf-up + light clean only for tractable meshes
+    bpy.ops.object.modifier_add(type='SUBSURF'); bpy.context.object.modifiers[-1].levels=${round}
+    bpy.ops.object.modifier_apply(modifier=bpy.context.object.modifiers[-1].name)
+    bpy.ops.object.shade_smooth()
+    done='smooth + subsurf x'+'${round}'
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.export_scene.gltf(filepath=${JSON.stringify(glb)}, use_selection=False, export_format='GLB')
-print('REFINED', len(mesh.data.vertices))
+print('REFINED', done, len(mesh.data.vertices))
 `;
   const tmp = '/tmp/jarv_refine.mjs_tmp.py';
   fs.writeFileSync(tmp, script);
-  try { await promisify(execFile)(blender, ['--background', '--python', tmp], { timeout: 150_000 }); return { ok: fs.statSync(glb).size > 0 }; }
-  catch (err) { return { ok: false, error: err?.message }; }
-  finally { try { fs.unlinkSync(tmp); } catch {} }
+  try {
+    await promisify(execFile)(blender, ['--background', '--python', tmp], { timeout: 90_000 });
+    return { ok: fs.statSync(glb).size > 0 };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'refine timed out' };
+  } finally {
+    try { fs.unlinkSync(tmp); } catch {}
+  }
 }
