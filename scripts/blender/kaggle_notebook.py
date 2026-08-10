@@ -290,6 +290,13 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
             print(f"[paint-host] bpy stub error: {exc}")
         sys.path.insert(0, HUNYUAN_DIR)
         sys.path.insert(0, os.path.join(HUNYUAN_DIR, "hy3dpaint"))
+        # The paint loads resources via RELATIVE paths (e.g. 'ckpt/RealESRGAN_x4plus.pth').
+        # Install() chdir'd away, so chdir back into hy3dpaint so those resolve.
+        try:
+            os.chdir(os.path.join(HUNYUAN_DIR, "hy3dpaint"))
+            print("[paint-host] cwd -> hy3dpaint (relative resource paths will resolve)")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[paint-host] cwd set warn: {exc}")
         from textureGenPipeline import Hunyuan3DPaintConfig, Hunyuan3DPaintPipeline
         _JOBS[job_id]["status"] = "running"
         config = Hunyuan3DPaintConfig(max_num_view=MAX_NUM_VIEW, resolution=RESOLUTION)
