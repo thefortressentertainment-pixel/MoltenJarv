@@ -222,6 +222,15 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
                     pass
         except Exception:  # noqa: BLE001
             pass
+        # torchvision 0.16+ removed transforms.functional_tensor (moved into
+        # transforms.functional). basicsr/realesrgan still import functional_tensor;
+        # alias it to the current functional module so those imports resolve.
+        try:
+            import sys as _tvs, torchvision, torchvision.transforms.functional as _fn
+            _tvs.modules.setdefault("torchvision.transforms.functional_tensor", _fn)
+            _tvs.modules.setdefault("torchvision.transforms.functional_pil", _fn)
+        except Exception:  # noqa: BLE001
+            pass
         # textureGenPipeline imports 'from DifferentiableRenderer.mesh_utils import
         # convert_obj_to_glb', and mesh_utils does `import bpy` at module load.
         # bpy pip isn't installable on Kaggle, so alias a stub bpy module so the
