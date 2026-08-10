@@ -47,13 +47,32 @@ _job_counter = [0]
 def install():
     global HUNYUAN_DIR
     print("[paint-host] installing Hunyuan3D-2.1 (clone + deps + compile)...")
-    print("[paint-host] NOTE: this can take ~5-15 min on first run; the tunnel URL prints AFTER install.")
+    print("[paint-host] NOTE: first run can take ~10-20 min (clone + heavy deps + CUDA compile).")
+    # --- 0) build prerequisites for the CUDA rasterizer compile -----------------
+    # Kaggle often lacks python3-config / build-essential; without them the custom
+    # rasterizer (custom_rasterizer + DifferentiableRenderer) can't compile and the
+    # paint pipeline fails. Install them first (Kaggle runs as root -> apt-get).
+    print("[paint-host] ensuring build tools (python3-dev, build-essential)...")
+    try:
+        subprocess.run(["apt-get", "update", "-qq"], check=False)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        subprocess.run(["apt-get", "install", "-y", "-qq", "python3-dev", "build-essential", "gcc", "g++", "ninja-build"], check=True)
+        print("[paint-host] build tools ready")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[paint-host] WARN: could not apt-get build tools: {exc}")
+    # setuptools + ninja help torch CUDA extensions build (esp. setup.py develop)
+    try:
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "setuptools", "ninja"], check=False)
+    except Exception:  # noqa: BLE001
+        pass
+
     if not os.path.isdir("Hunyuan3D-2.1"):
         try:
             subprocess.run(["git", "clone", "--depth", "1", HUNYUAN_GIT, "Hunyuan3D-2.1"], check=True)
         except Exception as exc:  # noqa: BLE001
             print(f"[paint-host] WARN: git clone failed: {exc}")
-            print("[paint-host] continuing anyway — the paint stage needs the checkout; if this errors the tunnel still starts.")
     HUNYUAN_DIR = os.path.join(os.getcwd(), "Hunyuan3D-2.1")
     if not os.path.isdir(HUNYUAN_DIR):
         print("[paint-host] WARN: Hunyuan3D-2.1 dir missing; paint will fail but tunnel still starts.")
@@ -61,17 +80,37 @@ def install():
     os.chdir(HUNYUAN_DIR)
     def _run(args, **kw):
         try:
-            subprocess.run(args, check=False, **kw)
+            return subprocess.run(args, check=False, **kw)
         except Exception as exc:  # noqa: BLE001
             print(f"[paint-host] WARN: step failed ({exc}) — continuing")
+            return None
+
     _run([sys.executable, "-m", "pip", "install", "-q",
           "torch==2.5.1", "torchvision==0.20.1", "torchaudio==2.5.1",
           "--index-url", "https://download.pytorch.org/whl/cu124"])
     _run([sys.executable, "-m", "pip", "install", "-q", "-r", "requirements.txt"])
+
+    # --- compile the custom CUDA rasterizers (REQUIRED for paint) ---------------
+    print("[paint-host] compiling mesh painter (DifferentiableRenderer + custom_rasterizer)...")
     _run(["bash", "compile_mesh_painter.sh"],
          cwd=os.path.join(HUNYUAN_DIR, "hy3dpaint", "DifferentiableRenderer"))
     _run([sys.executable, "-m", "pip", "install", "-q", "-e", "."],
          cwd=os.path.join(HUNYUAN_DIR, "hy3dpaint", "custom_rasterizer"))
+
+    # --- verify the rasterizer actually built, else paint can't run --------------
+    built = False
+    for base, names in [
+        (os.path.join(HUNYUAN_DIR, "hy3dpaint", "DifferentiableRenderer"), ["get_bbox_cuda", "get_view_direction_cuda"]),
+        (os.path.join(HUNYUAN_DIR, "hy3dpaint", "custom_rasterizer"), []),
+    ]:
+        for root, _, files in os.walk(base):
+            if any("cuda" in f.lower() and f.endswith(".so") for f in files):
+                built = True
+    if built:
+        print("[paint-host] rasterizer compiled OK.")
+    else:
+        print("[paint-host] !! rasterizer compile may have failed — paint may error at runtime. Check the build output above.")
+
     ckpt_dir = os.path.join(HUNYUAN_DIR, "hy3dpaint", "ckpt")
     os.makedirs(ckpt_dir, exist_ok=True)
     ckpt = os.path.join(ckpt_dir, "RealESRGAN_x4plus.pth")
