@@ -124,7 +124,7 @@ def install():
             return None
 
     _run([sys.executable, "-m", "pip", "install", "-q",
-          "torch==2.5.1", "torchvision==0.20.1", "torchaudio==2.5.1",
+          "torch==2.6.0", "torchvision==0.21.0", "torchaudio==2.6.0",
           "--index-url", "https://download.pytorch.org/whl/cu124"])
     _run([sys.executable, "-m", "pip", "install", "-q", "-r", "requirements.txt"])
     # Explicit runtime deps the paint pipeline needs at import time (trimesh handles
