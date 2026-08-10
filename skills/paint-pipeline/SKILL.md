@@ -83,11 +83,46 @@ installs ~15 min).
    -> Bind `import trimesh as _mu_trimesh` INSIDE the stub block (before the helper
       defs) and use the local alias in load_mesh/save_mesh.
 
+7. `NameError: cannot access free variable 'trimesh' ... enclosing scope` in the
+   notebook's injected mesh_utils save_mesh
+   -> The notebook's helper fns referenced `trimesh`, which is only `import trimesh`
+      LATER in `_run_paint` (after paint() returns) -> unbound free variable at save time.
+   -> Bind `import trimesh as _mu_trimesh` INSIDE the stub block (before the helper
+      defs) and use the local alias in load_mesh/save_mesh.
+
+8. Silent UNPAINTED GLB (job returns "remote-painted GLB at ..." but the GLB has
+   `materials:0 textures:0 images:0`, only POSITION, ~776KB, byte-identical every run)
+   -> MULTIPLE candidate root causes, all silent. Do NOT trust a "success" — verify the
+      GLB in the returned bytes. Debug in this order:
+      a) trimesh SILENTLY drops UV/texture if pillow isn't importable (mikedh/trimesh#2333,
+         only a buried log.debug). Probe `import PIL` at save time; raise if missing.
+      b) `MeshRender.save_mesh` receives `texture_data = self.get_texture()`; if the paint
+         bake set no `self.tex`, texture is None -> attach is skipped and a bare GLB falls
+         through with NO error. ASSERT texture is not None in save_mesh (log shape/min/max/
+         UV/faces; raise with a loud message).
+      c) A bare `Trimesh.export(glb)` is known to drop textures; the canonical test-backed
+         path is PBRMaterial owns image + TextureVisuals(uv, material) + export via
+         mesh.scene() (see trimesh test_gltf.py test_material_primary_colors / test_tex_export).
+      d) Ground-truth gate: after export, re-open the GLB and assert it has a `materials`
+         section AND `TEXCOORD_0`; raise if not (turns the silent miss into a loud job fail).
+
+9. `pip: error: subprocess-exited-with-error ... Getting requirements to build wheel did
+   not run successfully. exit code: 1` at install time, plus a wall of "X requires
+   numpy>=2, but you have numpy 1.26" conflicts
+   -> `pip install -r requirements.txt` (Hunyuan's own, unpinned) triggers a SOURCE wheel
+      build that fails under the numpy-1.26/py3.12 combo. Half the Kaggle base image is
+      numpy-2-only. This is an environment fragility, not a code bug. It can silently
+      break downstream deps (e.g. leave pillow/opencv unusable) even though the notebook
+      "finishes". Watch for it; a failed wheel build may need a pinned prebuilt wheel or
+      an explicit compatible dep list rather than raw requirements.txt.
+
 ## Standing rules
-- Keep numpy==1.26.4 and scipy==1.13.1 pinned; never let pip pull scipy->newest.
+- Keep numpy==1.26.4 and scipy==1.13.1 and Pillow==10.4.0 pinned; re-pin last.
+- NEVER trust a "remote-painted GLB at ..." success string — parse the returned GLB and
+  confirm `materials` + `TEXCOORD_0` present before importing in Blender.
 - Every bpy-dependent `DifferentiableRenderer` module needs a bpy-free sys.modules
   stub; when a new NameError appears with "from .X import Y", X is a C++/bpy
   module -> stub it in sys.modules.
 - Full traceback beats summary: rely on `format_exc()` in the job error.
-- After the paint succeeds (`/tmp/jarv_painted.glb`), the notebook converts the
-  textured .obj to GLB via trimesh before returning the job result.
+- Any silent failure (no error but wrong output) should be converted to a loud assertion
+  (gate) before re-running, so we stop guessing.
