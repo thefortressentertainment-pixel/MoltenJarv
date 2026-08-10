@@ -31,10 +31,10 @@ test('blenderToolRegistry is scoped to only Blender-relevant tools (tiny schema)
   // Must include the Blender-driving essentials, incl. the live-scene bpy_exec,
   // the reference-image spec tool, the real-topology base humanoid, CC0 assets,
   // the MLX image-to-3D craft, and its clean GLB import.
-  for (const need of ['run_shell', 'bpy_exec', 'bpy_base_mesh', 'bpy_polyhaven', 'bpy_craft', 'bpy_import_craft', 'bpy_reference', 'bpy_compare', 'file_read', 'file_write', 'web_search']) {
+  for (const need of ['run_shell', 'bpy_exec', 'bpy_base_mesh', 'bpy_polyhaven', 'bpy_craft', 'bpy_import_craft', 'bpy_reference', 'bpy_compare', 'bpy_paint_remote', 'file_read', 'file_write', 'web_search']) {
     assert.ok(names.includes(need), `${need} must be in the Blender toolset`);
   }
-  assert.ok(names.length <= 16, `Blender toolset stays tiny (got ${names.length})`);
+  assert.ok(names.length <= 17, `Blender toolset stays tiny (got ${names.length})`);
 });
 
 test('runLiveBpy reports no-blender cleanly when Blender is not open', async () => {

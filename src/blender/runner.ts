@@ -10,6 +10,7 @@ import { describeToSpec, extractAbsoluteImagePath } from './reference.js';
 import { BASE_HUMANOID_SNIPPET } from './basemesh.js';
 import { searchPolyHavenAssets, resolvePolyHavenFile, downloadPolyHavenFile } from './polyhaven.js';
 import { craftReady, runCraft, craftGlbPath } from './craft.js';
+import { runRemotePaint } from './paintRemote.js';
 import { loadBlenderSnapshot, renderBlenderSnapshot, saveBlenderSnapshot, loadProjectNotes, renderProjectContext, recordProjectNote } from './state.js';
 
 /**
@@ -44,6 +45,7 @@ const BLENDER_TOOL_NAMES = new Set<string>([
   'bpy_reference',
   'bpy_render_report',
   'bpy_compare',
+  'bpy_paint_remote',
   'file_read', 'file_write', 'file_list', 'file_delete',
   'web_search', 'web_read',
   'screen_capture',
@@ -426,6 +428,45 @@ function bpyImportCraftTool(config: JarvGenieConfig): ToolDefinition {
   };
 }
 
+/** A bpy_paint_remote tool: hand the texture/paint stage to a FREE 0-cost GPU host
+ *  (Kaggle dual-T4 / Colab), since the paint model needs ~38GB RAM the M1 lacks.
+ *  Uploads the crafted mesh + reference, the remote runs Hunyuan3D-2.1 paint, and
+ *  returns a textured GLB you then import into Blender. Set BLENDER_PAINT_URL. */
+function bpyPaintRemoteTool(config: JarvGenieConfig): ToolDefinition {
+  return {
+    name: 'bpy_paint_remote',
+    system: 'sense',
+    description:
+      'Send the crafted mesh + the reference image to a FREE 0-cost GPU host (Kaggle/Colab) which runs the Hunyuan3D paint stage (the M1 cannot — it needs ~38GB RAM). Returns a textured PBR GLB to import into Blender. Configure once with: jarv-genie key set BLENDER_PAINT_URL <url> (+ BLENDER_PAINT_TOKEN). Pass the crafted mesh GLB path and the reference image path.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mesh: { type: 'string', description: 'Path to the crafted mesh GLB (default /tmp/jarv_crafted.glb).' },
+        reference: { type: 'string', description: 'Absolute path to the reference image.' },
+      },
+      required: ['reference'],
+    },
+    handler: async (args) => {
+      const reference = String(args.reference ?? '').trim();
+      if (!reference) return { ok: false, error: 'reference is required' };
+      const mesh = String(args.mesh ?? '').trim() || craftGlbPath();
+      try {
+        const fs = await import('node:fs');
+        if (!fs.existsSync(mesh)) return { ok: false, error: `mesh GLB not found: ${mesh}` };
+        if (!fs.existsSync(reference)) return { ok: false, error: `reference not found: ${reference}` };
+      } catch { /* ignore */ }
+      // RAM-light guard: only the M1 networking is used here; the heavy paint is remote.
+      const result = await runRemotePaint(mesh, reference);
+      if (!result.ok) return { ok: false, error: result.error ?? 'remote paint failed' };
+      return {
+        ok: true,
+        glb: result.glb,
+        note: `Painted GLB saved → ${result.glb}. This is now a textured model from the free GPU host. IMPORT it into Blender (File>Import>glTF 2.0, or bpy_import_craft) and refine.`,
+      };
+    },
+  };
+}
+
 export interface BlenderRunInput {
   message: string;
   /** Blender path override; defaults to the primary (smart) model. */
@@ -732,6 +773,7 @@ export function blenderToolRegistry(config: JarvGenieConfig): ToolRegistry {
     bpyReferenceTool(config),
     bpyRenderReportTool(config),
     bpyCompareTool(config),
+    bpyPaintRemoteTool(config),
   ];
   const scoped = all.filter((t) => BLENDER_TOOL_NAMES.has(t.name));
   registry.registerMany(scoped);
