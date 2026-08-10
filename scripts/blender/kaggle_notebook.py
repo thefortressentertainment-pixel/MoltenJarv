@@ -319,9 +319,27 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
                     vtx_uv = _as(vtx_uv, _mu_np.float32)
                     uv_idx = _as(uv_idx, _mu_np.int32)
                     mesh = _mu_trimesh.Trimesh(vertices=vtx_pos, faces=pos_idx, process=False)
-                    if vtx_uv is not None and uv_idx is not None:
+                    # Attach the painted diffuse texture as a GLTF material so the
+                    # exported GLB carries it (bare geometry + UV alone yields an
+                    # unpainted mesh in Blender).
+                    if texture is not None and vtx_uv is not None:
                         try:
-                            mesh.visual.uv = vtx_uv
+                            _img_arr = _mu_np.asarray(texture)
+                            _img_arr = (_img_arr * 255.0).astype(_mu_np.uint8)
+                            if _img_arr.shape[-1] == 1:
+                                _img_arr = _mu_np.repeat(_img_arr, 3, axis=-1)
+                            if _img_arr.shape[-1] == 4:
+                                _img_arr = _img_arr[..., :3]
+                            _pil_from = __import__("PIL.Image", fromlist=["Image"]).Image
+                            _pil_img = _pil_from.fromarray(_img_arr[:, :, ::-1])  # -> RGB
+                            _mat_kw = {}
+                            try:
+                                from trimesh.visual.material import PBRMaterial
+                                _mat = PBRMaterial(baseColorTexture=_pil_img)
+                            except Exception:
+                                _mat = _pil_img
+                            from trimesh.visual.texture import TextureVisuals
+                            mesh.visual = TextureVisuals(uv=vtx_uv, image=_pil_img, material=_mat)
                         except Exception:
                             pass
                     if mesh_path.lower().endswith(".glb"):
