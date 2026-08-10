@@ -27,7 +27,12 @@ def sh(cmd, **kw):
 
 def log_gpu(tag):
     r = sh("nvidia-smi --query-gpu=index,memory.total,memory.used,memory.free --format=csv,nounits")
-    print(f"[gpu {tag}]\n{r.stdout}\n{r.stderr[-500:] if r.stderr else ''}", flush=True)
+    if r.returncode != 0:
+        print("[trellis] WARNING: nvidia-smi not found — this looks like a CPU-only Kaggle session.", flush=True)
+        print("Enable GPU: notebook right panel -> Settings -> Accelerator -> 'GPU T4 x2', then Restart Session.", flush=True)
+    else:
+        print(f"[gpu {tag}]\n{r.stdout}", flush=True)
+        print(r.stderr[-500:] if r.stderr else "", flush=True)
 
 
 def main():
@@ -39,13 +44,27 @@ def main():
     img = (
         os.environ.get("TRELLIS_IMG")
         or (sys.argv[1] if len(sys.argv) > 1 else None)
-        or "/kaggle/input/3d-wizard/3D-wizard.jpeg"
     )
-    if not os.path.exists(img):
-        print(f"[trellis] FATAL: image not found at {img}", flush=True)
-        print("Upload it via the Kaggle notebook left panel (+ Add Input / Upload), then", flush=True)
-        print("re-run with:  !python trellis-spike.py /kaggle/input/<name>/3D-wizard.jpeg", flush=True)
-        sys.exit(1)
+    if not img or not os.path.exists(img):
+        # Auto-discover the first image under /kaggle/input so the exact dataset
+        # slug/filename don't have to be guessed.
+        import fnmatch
+        img = None
+        root = "/kaggle/input"
+        print(f"[trellis] no valid image passed; scanning {root} ...", flush=True)
+        for base, _dirs, files in os.walk(root):
+            for f in sorted(files):
+                if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+                    img = os.path.join(base, f)
+                    print(f"[trellis] found candidate: {img}", flush=True)
+                    break
+            if img:
+                break
+        if not img:
+            print(f"[trellis] FATAL: no image under {root}", flush=True)
+            print("Upload it via the Kaggle notebook left panel (+ Add Input / Upload a Dataset),", flush=True)
+            print("then re-run. You can also pass the exact path: !python trellis-spike.py /kaggle/input/<name>/file.jpg", flush=True)
+            sys.exit(1)
     from PIL import Image
     im = Image.open(img).convert("RGB")
     print("image", im.size, im.mode, flush=True)
