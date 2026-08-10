@@ -36,6 +36,8 @@ def log_gpu(tag):
 
 
 def main():
+    global trellis_libs
+    trellis_libs = "/kaggle/working/trellis_libs"
     log_gpu("start")
     print(f"[trellis] interpreter: {sys.version.split()[0]} at {sys.executable}", flush=True)
 
@@ -86,31 +88,32 @@ def main():
     pip = [sys.executable, "-m", "pip", "install", "-q"]
 
     print("[trellis] installing base torch + deps (this can be slow)", flush=True)
-    # The host has a stray/newer torch somewhere on sys.path (revealed by torchvision
-    # importing a torch WITHOUT register_fake -> 'torch.library has no register_fake').
-    # Multiple torch installs + version skew is the whole problem. Blast them all out
-    # first, then install ONE matched pair in a single resolve:
+    # The box has TWO pythons and a stray torch (2.3.1) that torchvision resolves to,
+    # separate from what /usr/bin/python3 -m pip installs. Fiddling with the global
+    # env is a losing battle, so install a SELF-CONTAINED matched set into one dir and
+    # force it onto sys.path by appending to PYTHONPATH (subprocess + our own process).
     #   torch 2.4.0 <-> torchvision 0.19.0 <-> torchaudio 2.4.0, xformers 0.0.27 (cu121).
-    sh(f"{sys.executable} -m pip uninstall -y -q torch torchvision torchaudio xformers", timeout=600)
-    _pip = f"{sys.executable} -m pip install -q"
+    trellis_libs = "/kaggle/working/trellis_libs"
+    os.makedirs(trellis_libs, exist_ok=True)
+    os.environ.setdefault("PYTHONPATH", trellis_libs + ":" + os.environ.get("PYTHONPATH", ""))
+    _pip = f"{sys.executable} -m pip install -q --target {trellis_libs}"
     r = sh(
         _pip + " torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0"
         + " --index-url https://download.pytorch.org/whl/cu121",
-        timeout=1800,
+        timeout=2400,
     )
     print("pip torch rc", r.returncode, r.stderr[-800:], flush=True)
     r = sh(
         _pip + " einops imageio imageio-ffmpeg matplotlib ninja numpy pillow scipy tqdm trimesh ipywidgets"
         + " 'xformers==0.0.27'",
-        timeout=1800,
+        timeout=2400,
     )
     print("pip deps rc", r.returncode, r.stderr[-800:], flush=True)
-    # sanity: verify the SAME interpreter the spike imports from, that torch+tv are a
-    # consistent pair before anything loads the model.
+    # sanity: confirm the same PYTHONPATH resolves a consistent torch+tv pair.
     r = sh(
-        f"{sys.executable} -W ignore -c "
+        f"PYTHONPATH={trellis_libs} {sys.executable} -W ignore -c "
         "'import torch, torchvision; "
-        "print(\"torch\", torch.__version__, \"tv\", torchvision.__version__, torch.__file__.split(\"site-packages/\")[-1])'",
+        "print(\"torch\", torch.__version__, \"tv\", torchvision.__version__, torch.__file__.split(\"site-packages/\")[-1] if \"site-packages\" in torch.__file__ else torch.__file__)'",
     )
     print("TORCH CHECK:\n" + r.stdout + r.stderr[-600:], flush=True)
 
@@ -123,7 +126,11 @@ def main():
             print(f"[trellis] {sub} rc={r.returncode} {r.stderr[-500:]}", flush=True)
 
     # 4. Run image->3D and export a textured GLB.
+    # Our self-contained matched torch/torchvision live in trellis_libs; make sure
+    # THIS process imports from there (PYTHONPATH set mid-process won't change
+    # sys.path for the already-running interpreter, so prepend it directly).
     sys.path.insert(0, "/kaggle/working/TRELLIS")
+    sys.path.insert(0, trellis_libs)
     gc.collect()
     log_gpu("after-install")
     from trellis.pipelines import TrellisImageTo3DPipeline
