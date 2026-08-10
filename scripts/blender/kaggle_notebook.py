@@ -196,13 +196,14 @@ def _gpu_count():
 
 def _run_paint(job_id, mesh_path, ref_path, out_path):
     try:
-        # Self-heal numpy: if a session dep bumped numpy to 2.2+, diffusers fails
-        # with 'No module named numpy.char'. Force back to <2.2 (has numpy.char).
+        # Compatibility: diffusers (needed by Hunyuan3D paint) does `import numpy.char`,
+        # which was removed in numpy 2.x (renamed to numpy.strings). Alias it so the
+        # import works regardless of the session's numpy version.
         try:
             import numpy
-            if not hasattr(numpy, "char") or "char" not in dir(numpy):
-                import subprocess as _sp, sys as _sys
-                _sp.run([_sys.executable, "-m", "pip", "install", "-q", "numpy==1.26.4"], check=False)
+            import numpy.strings as _strings
+            import sys as _sys
+            _sys.modules.setdefault("numpy.char", _strings)
         except Exception:  # noqa: BLE001
             pass
         sys.path.insert(0, HUNYUAN_DIR)
