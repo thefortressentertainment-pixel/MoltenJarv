@@ -231,11 +231,24 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
             _tvs.modules.setdefault("torchvision.transforms.functional_pil", _fn)
         except Exception:  # noqa: BLE001
             pass
-        # textureGenPipeline imports 'from DifferentiableRenderer.mesh_utils import
-        # convert_obj_to_glb', and mesh_utils does `import bpy` at module load.
-        # bpy pip isn't installable on Kaggle, so alias a stub bpy module so the
-        # import succeeds; the bpy-using function is never CALLED because we export
-        # the GLB via trimesh (save_glb=False). Only the name lookup must resolve.
+        # textureGenPipeline does `from DifferentiableRenderer.mesh_utils import
+        # convert_obj_to_glb`, and that module does `import bpy` at load; bpy isn't
+        # pip-installable on Kaggle and its import made the pipeline fail. Since we
+        # export the GLB via trimesh (save_glb=False), convert_obj_to_glb is never
+        # CALLED — so we pre-register a fake mesh_utils with a no-op convert_obj_to_glb,
+        # which fully bypasses the bpy import (no stub-recursion risk).
+        try:
+            import sys as _mu, types as _types
+            if "DifferentiableRenderer.mesh_utils" not in _mu.modules:
+                _m = _types.ModuleType("DifferentiableRenderer.mesh_utils")
+                def _noop(*a, **k):
+                    return None
+                _m.convert_obj_to_glb = _noop
+                _m.convert_obj_to_glb_no_remesh = _noop
+                _mu.modules["DifferentiableRenderer.mesh_utils"] = _m
+                _mu.modules["hy3dpaint.DifferentiableRenderer.mesh_utils"] = _m
+        except Exception:  # noqa: BLE001
+            pass
         try:
             import sys as _s2, types as _types
             if "bpy" not in _s2.modules:
