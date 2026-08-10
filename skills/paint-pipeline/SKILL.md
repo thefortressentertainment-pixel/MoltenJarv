@@ -144,3 +144,17 @@ POSITION,TEXCOORD_0 (4.3MB vs 776KB unpainted). Verify the GLB bytes, not the
 job's "remote-painted GLB" string. Successful run confirms the 3 checks that must
 all be True in the cell: `save_mesh TEXTURE: <shape>`, `save_mesh attached painted
 texture <WxH> uv=<N,2>`, and `save_mesh GLB gate: material=True texcoord=True`.
+
+== DETAIL TUNING (for real 1:1 mesh + texture fidelity) ==
+The "cut-out sheet" / "chiseled / crumpled paper" look comes from TWO detail collapses:
+1. Mesh: the paint's remesh decimated the ~182k-vert crafted mesh to STOCK 40k faces
+   (simplify_mesh_utils target_count=40000) before texturing -> chiseled surface.
+   -> Now env-overridable BLENDER_PAINT_TARGET_FACES (default 180000) keeps the
+      geometry. In the notebook cell/install set the env var before running.
+2. Texture: RESOLUTION=512 + MAX_NUM_VIEW=6 capped bake density.
+   -> env BLENDER_PAINT_RESOLUTION (default 768) and BLENDER_PAINT_MAX_VIEW (default 8).
+To dial: in the Kaggle cell, `%env BLENDER_PAINT_TARGET_FACES=200000
+BLENDER_PAINT_RESOLUTION=1024 BLENDER_PAINT_MAX_VIEW=16` before the fetch cell; raise
+until VRAM OOM/throttle, then back off. Single front-facing refs also produce a
+bas-relief "flat slab" mesh -> craft with --steps 60 (and --sym) for frontal refs to
+ground the reconstruction; angled refs give full volume.
