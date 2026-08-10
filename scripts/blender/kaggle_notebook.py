@@ -120,6 +120,10 @@ def install():
           "torch==2.5.1", "torchvision==0.20.1", "torchaudio==2.5.1",
           "--index-url", "https://download.pytorch.org/whl/cu124"])
     _run([sys.executable, "-m", "pip", "install", "-q", "-r", "requirements.txt"])
+    # Explicit runtime deps the paint pipeline needs at import time (trimesh handles
+    # mesh load/save/export; the source repo's requirements may not pin these).
+    _run([sys.executable, "-m", "pip", "install", "-q",
+          "trimesh", "numpy", "Pillow", "scipy", "rembg", "huggingface_hub"])
 
     # --- compile the custom CUDA rasterizers (REQUIRED for paint) ---------------
     print("[paint-host] compiling mesh painter (DifferentiableRenderer + custom_rasterizer)...")
@@ -145,13 +149,15 @@ def install():
 
     # --- verify the rasterizer actually built, else paint can't run --------------
     built = False
-    for base, names in [
-        (os.path.join(HUNYUAN_DIR, "hy3dpaint", "DifferentiableRenderer"), ["get_bbox_cuda", "get_view_direction_cuda"]),
-        (os.path.join(HUNYUAN_DIR, "hy3dpaint", "custom_rasterizer"), []),
+    for base in [
+        os.path.join(HUNYUAN_DIR, "hy3dpaint", "DifferentiableRenderer"),
+        os.path.join(HUNYUAN_DIR, "hy3dpaint", "custom_rasterizer"),
     ]:
         for root, _, files in os.walk(base):
-            if any("cuda" in f.lower() and f.endswith(".so") for f in files):
-                built = True
+            for f in files:
+                # .so that is a torch extension (custom_rasterizer_kernel = built)
+                if f.endswith(".so") and ("cuda" in f.lower() or "kernel" in f.lower()):
+                    built = True
     if built:
         print("[paint-host] rasterizer compiled OK.")
     else:
