@@ -325,6 +325,16 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
                     # material ONLY (no image kwarg), and the mesh MUST be exported via
                     # a Scene (a bare Trimesh GLB export is known to drop the texture).
                     attached = False
+                    # trimesh SILENTLY drops UV/textures when pillow isn't importable
+                    # (mikedh/trimesh#2333) — no warning, just a bare-mesh GLB. Probe it
+                    # here so that case fails loudly instead of shipping an unpainted mesh.
+                    try:
+                        import PIL as _pil_probe
+                        _pil_ver = getattr(_pil_probe, "__version__", "?")
+                        print(f"[paint-host] save_mesh pillow == {_pil_ver} (importable)")
+                    except Exception as _pilerr:
+                        raise RuntimeError(f"Pillow NOT importable at save time — trimesh will silently drop the "
+                                           f"painted texture ({_pilerr}). Install/repair pillow (see notebook install pins).")
                     if texture is not None and vtx_uv is not None:
                         try:
                             _img_arr = _mu_np.asarray(texture)
