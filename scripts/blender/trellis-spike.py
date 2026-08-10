@@ -103,12 +103,25 @@ def main():
         timeout=2400,
     )
     print("pip torch rc", r.returncode, r.stderr[-800:], flush=True)
+    # Full TRELLIS --basic python deps (from setup.sh) + utils3d (git pin) + a few we
+    # know import path chokes on, all into the self-contained libs dir in ONE resolve:
+    #   pillow imageio imageio-ffmpeg tqdm easydict opencv-python-headless scipy ninja
+    #   rembg onnxruntime trimesh open3d xatlas pyvista pymeshfix igraph transformers
+    #   einops matplotlib ipywidgets plyfile xformers==0.0.27
+    #   git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8
     r = sh(
-        _pip + " einops imageio imageio-ffmpeg matplotlib ninja numpy pillow scipy tqdm trimesh ipywidgets"
-        + " 'xformers==0.0.27' 'rembg' 'onnxruntime' 'opencv-python-headless' 'open3d' 'plyfile'",
+        _pip + " pillow imageio imageio-ffmpeg tqdm easydict opencv-python-headless scipy ninja"
+        + " rembg onnxruntime trimesh open3d xatlas pyvista pymeshfix igraph transformers"
+        + " einops matplotlib ipywidgets plyfile 'xformers==0.0.27'",
         timeout=2400,
     )
     print("pip deps rc", r.returncode, r.stderr[-800:], flush=True)
+    r = sh(
+        f"{sys.executable} -m pip install -q --target {trellis_libs}"
+        + " 'git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8'",
+        timeout=1200,
+    )
+    print("pip utils3d rc", r.returncode, r.stderr[-800:], flush=True)
     # sanity: confirm the same PYTHONPATH resolves a consistent torch+tv pair.
     r = sh(
         f"PYTHONPATH={trellis_libs} {sys.executable} -W ignore -c "
