@@ -241,11 +241,24 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
             if "bpy" not in _s2.modules:
                 class _Dummy:
                     def __getattr__(self, k):
+                        # dunder/reflection must not recurse (deepcopy/pickle/hasattr)
+                        if k.startswith("__") and k.endswith("__"):
+                            raise AttributeError(k)
                         return _Dummy()
                     def __getitem__(self, k):
                         return _Dummy()
                     def __call__(self, *a, **k):
                         return _Dummy()
+                    def __deepcopy__(self, memo):
+                        return self
+                    def __bool__(self):
+                        return False
+                    def __iter__(self):
+                        return iter(())
+                    def __eq__(self, other):
+                        return isinstance(other, _Dummy)
+                    def __hash__(self):
+                        return id(self)
                 _stub = _types.ModuleType("bpy")
                 _stub.app = _types.ModuleType("bpy.app"); _stub.app.version = (4, 0, 0)
                 _stub.data = _Dummy(); _stub.context = _Dummy(); _stub.ops = _Dummy()
