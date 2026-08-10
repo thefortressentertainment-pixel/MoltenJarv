@@ -86,29 +86,33 @@ def main():
     pip = [sys.executable, "-m", "pip", "install", "-q"]
 
     print("[trellis] installing base torch + deps (this can be slow)", flush=True)
-    # ONE resolve with --force-reinstall so pip actually downgrades from a stray
-    # newer torch (2.13) that a prior split install left behind. torch/torchvision/
-    # torchaudio must match exactly (2.4.0 <-> 0.19.0 <-> 2.4.0); use xformers 0.0.27
-    # which supports torch 2.4 (0.0.35 needs torch>=2.10 and re-bumps torch). Installing
-    # them all together prevents the xformers->torch upgrade from re-breaking the pair.
-    _pip = f"{sys.executable} -m pip install --force-reinstall -q"
+    # The host has a stray/newer torch somewhere on sys.path (revealed by torchvision
+    # importing a torch WITHOUT register_fake -> 'torch.library has no register_fake').
+    # Multiple torch installs + version skew is the whole problem. Blast them all out
+    # first, then install ONE matched pair in a single resolve:
+    #   torch 2.4.0 <-> torchvision 0.19.0 <-> torchaudio 2.4.0, xformers 0.0.27 (cu121).
+    sh(f"{sys.executable} -m pip uninstall -y -q torch torchvision torchaudio xformers", timeout=600)
+    _pip = f"{sys.executable} -m pip install -q"
     r = sh(
-        _pip
-        + " torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0"
+        _pip + " torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0"
         + " --index-url https://download.pytorch.org/whl/cu121",
         timeout=1800,
     )
     print("pip torch rc", r.returncode, r.stderr[-800:], flush=True)
     r = sh(
-        _pip
-        + " einops imageio imageio-ffmpeg matplotlib ninja numpy pillow scipy tqdm trimesh ipywidgets"
+        _pip + " einops imageio imageio-ffmpeg matplotlib ninja numpy pillow scipy tqdm trimesh ipywidgets"
         + " 'xformers==0.0.27'",
         timeout=1800,
     )
     print("pip deps rc", r.returncode, r.stderr[-800:], flush=True)
-    # sanity: print what's actually importable so we catch a stale torch before the model loads
-    r = sh(f"{sys.executable} -c 'import torch, torchvision; print(\"torch\", torch.__version__, \"tv\", torchvision.__version__)'")
-    print(r.stdout, r.stderr[-400:], flush=True)
+    # sanity: verify the SAME interpreter the spike imports from, that torch+tv are a
+    # consistent pair before anything loads the model.
+    r = sh(
+        f"{sys.executable} -W ignore -c "
+        "'import torch, torchvision; "
+        "print(\"torch\", torch.__version__, \"tv\", torchvision.__version__, torch.__file__.split(\"site-packages/\")[-1])'",
+    )
+    print("TORCH CHECK:\n" + r.stdout + r.stderr[-600:], flush=True)
 
     # build the local submodules that have wheels / are light; catch failures non-fatally
     for sub in ["diffoctreerast", "spconv", "kaolin", "nvdiffrast", "mipgaussian"]:
