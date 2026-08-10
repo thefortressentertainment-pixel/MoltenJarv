@@ -201,9 +201,24 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
         # import works regardless of the session's numpy version.
         try:
             import numpy
-            import numpy.strings as _strings
             import sys as _sys
-            _sys.modules.setdefault("numpy.char", _strings)
+            # numpy 2.x renamed numpy.char -> numpy.strings and numpy.rec -> numpy.recarray;
+            # diffusers imports both. Alias so the imports work on any numpy version.
+            try:
+                import numpy.strings as _strings
+                _sys.modules.setdefault("numpy.char", _strings)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                import numpy.recarray
+                _sys.modules.setdefault("numpy.rec", numpy.recarray)
+            except Exception:  # noqa: BLE001
+                # fallback: rec lives at numpy.core.records in some 2.x builds
+                try:
+                    import numpy.core.records as _rec
+                    _sys.modules.setdefault("numpy.rec", _rec)
+                except Exception:  # noqa: BLE001
+                    pass
         except Exception:  # noqa: BLE001
             pass
         # textureGenPipeline imports 'from DifferentiableRenderer.mesh_utils import
