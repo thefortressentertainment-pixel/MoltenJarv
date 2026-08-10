@@ -281,19 +281,64 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
         except Exception:  # noqa: BLE001
             pass
         # textureGenPipeline does `from DifferentiableRenderer.mesh_utils import
-        # convert_obj_to_glb`, and that module does `import bpy` at load; bpy isn't
-        # pip-installable on Kaggle and its import made the pipeline fail. Since we
-        # export the GLB via trimesh (save_glb=False), convert_obj_to_glb is never
-        # CALLED — so we pre-register a fake mesh_utils with a no-op convert_obj_to_glb,
-        # which fully bypasses the bpy import (no stub-recursion risk).
+        # convert_obj_to_glb`, and MeshRender does `from .mesh_utils import
+        # load_mesh, save_mesh`; that module does `import bpy` at load, and bpy
+        # isn't pip-installable on Kaggle so the import fails and load_mesh/save_mesh
+        # are left UNBOUND -> NameError in MeshRender.load_mesh. Pre-register a
+        # bpy-free mesh_utils with real trimesh/numpy-based load_mesh + save_mesh
+        # (convert_obj_to_glb stays a no-op since the notebook GLBs via trimesh).
         try:
             import sys as _mu, types as _types
-            if "DifferentiableRenderer.mesh_utils" not in _mu.modules:
-                _m = _types.ModuleType("DifferentiableRenderer.mesh_utils")
+            import numpy as _mu_np
+            if "DifferentiableRenderer.mesh_utils" not in _mu.modules or getattr(
+                    _mu.modules.get("DifferentiableRenderer.mesh_utils"), "_jarv_real", False) is False:
                 def _noop(*a, **k):
                     return None
+
+                def _jum_load_mesh(mesh):
+                    m = trimesh.load(mesh, force="mesh") if isinstance(mesh, (str, bytes)) else mesh
+                    vtx_pos = _mu_np.asarray(m.vertices, dtype=_mu_np.float32)
+                    pos_idx = _mu_np.asarray(m.faces, dtype=_mu_np.int32)
+                    try:
+                        uv = m.visual.uv
+                    except Exception:
+                        uv = _mu_np.zeros((vtx_pos.shape[0], 2), dtype=_mu_np.float32)
+                    vtx_uv = _mu_np.asarray(uv, dtype=_mu_np.float32)
+                    uv_idx = _mu_np.asarray(m.faces, dtype=_mu_np.int32)
+                    return vtx_pos, pos_idx, vtx_uv, uv_idx, None
+
+                def _jum_save_mesh(mesh_path, vtx_pos, pos_idx, vtx_uv, uv_idx, texture,
+                                   metallic=None, roughness=None, normal=None):
+                    def _as(arr, dtype):
+                        return None if arr is None else _mu_np.asarray(arr, dtype=dtype)
+                    vtx_pos = _as(vtx_pos, _mu_np.float32)
+                    pos_idx = _as(pos_idx, _mu_np.int32)
+                    vtx_uv = _as(vtx_uv, _mu_np.float32)
+                    uv_idx = _as(uv_idx, _mu_np.int32)
+                    mesh = trimesh.Trimesh(vertices=vtx_pos, faces=pos_idx, process=False)
+                    if vtx_uv is not None and uv_idx is not None:
+                        try:
+                            mesh.visual.uv = vtx_uv
+                        except Exception:
+                            pass
+                    if mesh_path.lower().endswith(".glb"):
+                        mesh.export(mesh_path, file_type="glb")
+                    else:
+                        mesh.export(mesh_path, file_type="obj")
+                        if texture is not None:
+                            import os as _os
+                            import cv2 as _cv2
+                            _base = _os.path.splitext(mesh_path)[0]
+                            _img = (_mu_np.asarray(texture) * 255).astype(_mu_np.uint8)
+                            _cv2.imwrite(_base + ".jpg", _img[..., ::-1])
+
+                _m = _types.ModuleType("DifferentiableRenderer.mesh_utils")
                 _m.convert_obj_to_glb = _noop
                 _m.convert_obj_to_glb_no_remesh = _noop
+                _m.load_mesh = _jum_load_mesh
+                _m.save_mesh = _jum_save_mesh
+                _m.save_obj_mesh = _jum_save_mesh
+                _m._jarv_real = True
                 _mu.modules["DifferentiableRenderer.mesh_utils"] = _m
                 _mu.modules["hy3dpaint.DifferentiableRenderer.mesh_utils"] = _m
         except Exception:  # noqa: BLE001
