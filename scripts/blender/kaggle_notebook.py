@@ -320,8 +320,11 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
                     uv_idx = _as(uv_idx, _mu_np.int32)
                     mesh = _mu_trimesh.Trimesh(vertices=vtx_pos, faces=pos_idx, process=False)
                     # Attach the painted diffuse texture as a GLTF material so the
-                    # exported GLB carries it (bare geometry + UV alone yields an
-                    # unpainted mesh in Blender).
+                    # exported GLB carries it. Per trimesh's own tests, the correct
+                    # recipe is: PBRMaterial owns the image, TextureVisuals gets uv +
+                    # material ONLY (no image kwarg), and the mesh MUST be exported via
+                    # a Scene (a bare Trimesh GLB export is known to drop the texture).
+                    attached = False
                     if texture is not None and vtx_uv is not None:
                         try:
                             _img_arr = _mu_np.asarray(texture)
@@ -334,18 +337,21 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
                                 _img_arr = _img_arr[..., :3]
                             _pil_from = __import__("PIL.Image", fromlist=["Image"]).Image
                             _pil_img = _pil_from.fromarray(_img_arr[:, :, ::-1].copy())  # BGR->RGB
-                            try:
-                                from trimesh.visual.material import PBRMaterial
-                                _mat = PBRMaterial(baseColorTexture=_pil_img)
-                            except Exception:
-                                _mat = _pil_img
+                            from trimesh.visual.material import PBRMaterial
+                            _mat = PBRMaterial(baseColorTexture=_pil_img)
                             from trimesh.visual.texture import TextureVisuals
-                            mesh.visual = TextureVisuals(uv=vtx_uv, image=_pil_img, material=_mat)
+                            mesh.visual = TextureVisuals(uv=_mu_np.asarray(vtx_uv, dtype=_mu_np.float64), material=_mat)
+                            attached = True
                             print(f"[paint-host] save_mesh attached painted texture {_pil_img.size} uv={vtx_uv.shape}")
                         except Exception as _tex_err:
-                            print(f"[paint-host] save_mesh texture attach FAILED: {_tex_err}")
+                            import traceback as _mtb
+                            print(f"[paint-host] save_mesh texture attach FAILED: {_tex_err}\n{_mtb.format_exc()}")
                     if mesh_path.lower().endswith(".glb"):
-                        mesh.export(mesh_path, file_type="glb")
+                        if attached:
+                            _scene = mesh.scene()
+                            _scene.export(mesh_path, file_type="glb")
+                        else:
+                            mesh.export(mesh_path, file_type="glb")
                     else:
                         mesh.export(mesh_path, file_type="obj")
                         if texture is not None:
