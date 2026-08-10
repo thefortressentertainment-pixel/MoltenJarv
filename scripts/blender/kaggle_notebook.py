@@ -206,6 +206,26 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
             _sys.modules.setdefault("numpy.char", _strings)
         except Exception:  # noqa: BLE001
             pass
+        # textureGenPipeline imports 'from DifferentiableRenderer.mesh_utils import
+        # convert_obj_to_glb', and mesh_utils does `import bpy` at module load.
+        # bpy pip isn't installable on Kaggle, so alias a stub bpy module so the
+        # import succeeds; the bpy-using function is never CALLED because we export
+        # the GLB via trimesh (save_glb=False). Only the name lookup must resolve.
+        try:
+            import sys as _s2, types as _types
+            if "bpy" not in _s2.modules:
+                _stub = _types.ModuleType("bpy")
+                _stub.app = _types.ModuleType("bpy.app")
+                _stub.app.version = (4, 0, 0)
+                class _Dummy:
+                    def __getattr__(self, k):
+                        return _Dummy()
+                    def __call__(self, *a, **k):
+                        return _Dummy()
+                _stub.data = _Dummy(); _stub.context = _Dummy(); _stub.ops = _Dummy()
+                _s2.modules["bpy"] = _stub
+        except Exception:  # noqa: BLE001
+            pass
         sys.path.insert(0, HUNYUAN_DIR)
         sys.path.insert(0, os.path.join(HUNYUAN_DIR, "hy3dpaint"))
         from textureGenPipeline import Hunyuan3DPaintConfig, Hunyuan3DPaintPipeline
