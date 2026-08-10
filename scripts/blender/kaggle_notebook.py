@@ -133,13 +133,15 @@ def install():
     # '_multiarray_umath has no attribute _blas_supports_fpe'; torch 2.5 + rembg/
     # opencv expect numpy 1.x here.
     _run([sys.executable, "-m", "pip", "install", "-q", "--upgrade",
-          "numpy==1.26.4", "trimesh", "Pillow", "scipy==1.13.1", "rembg", "huggingface_hub"])
+          "numpy==1.26.4", "trimesh", "Pillow==10.4.0", "scipy==1.13.1", "rembg", "huggingface_hub"])
     # pymeshlab (mesh remesh for paint) + UV unwrap (xatlas) + misc
     _run([sys.executable, "-m", "pip", "install", "-q",
           "pymeshlab", "pygltflib", "opencv-python-headless", "xatlas", "open3d", "onnxruntime",
           "realesrgan", "basicsr", "fast_simplification"])
-    # RE-PIN numpy LAST (see above)
-    _run([sys.executable, "-m", "pip", "install", "-q", "numpy==1.26.4"])
+    # RE-PIN numpy + Pillow LAST: basicsr/realesrgan/torchvision pull the newest
+    # Pillow, whose ImageText.py imports `_Ink` from _typing and breaks torchvision
+    # import (cannot import name '_Ink') — pin Pillow 10.4.0 which has no ImageText.
+    _run([sys.executable, "-m", "pip", "install", "-q", "numpy==1.26.4", "Pillow==10.4.0"])
 
     # --- compile the custom CUDA rasterizers (REQUIRED for paint) ---------------
     print("[paint-host] compiling mesh painter (DifferentiableRenderer + custom_rasterizer)...")
