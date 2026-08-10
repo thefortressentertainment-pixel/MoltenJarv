@@ -4,10 +4,13 @@
  * native MLX Hunyuan3D binary (staged at ~/.jarv-genie/craft/).
  *
  * Usage (ONE command runs the WHOLE pipeline in succession: craft + auto-octree +
- * region-color + auto-refine sharpen; --sym for frontal refs):
- *   node scripts/blender/craft-one.mjs <image.png>
+ * region-color + auto-refine sharpen; --sym for frontal refs; --paint-remote to
+ * hand the real texture/paint stage to a free 0-cost GPU host):
+ *   node scripts/blender/craft-one.mjs <image.png> [--paint-remote]
  *   --auto-refine N   sharpen rounds after craft (default 3; 0 to skip)
  *   --sym             for perfectly symmetric/front-facing references
+ *   --paint-remote    also run the Hunyuan3D paint on a free Kaggle/Colab GPU host
+ *                     (set BLENDER_PAINT_URL first) and fetch the textured GLB
  *
  * RAM CRITICAL: the craft is a multi-GB Metal compute. It MUST run with Blender
  * (and any other memory hogs) closed. This script refuses if the Blender bridge
@@ -46,6 +49,10 @@ const guidance = sym ? 7.0 : undefined;
 // reference it was generated from. DEFAULT 3 so a bare command runs the WHOLE
 // pipeline (craft -> region-color -> sharpen) in one go. Use --auto-refine 0 to skip.
 const refineRounds = flag('--auto-refine', 3);
+// --paint-remote: after craft, hand the mesh + reference to the configured FREE
+// GPU host (Kaggle dual-T4 via BLENDER_PAINT_URL) to run the real Hunyuan3D-2.1
+// texture/paint stage, and download the textured GLB. 0-cost paint, off the M1.
+const paintRemote = args.includes('--paint-remote');
 let octree = flag('--octree', 0);
 if (!explicitOctree) {
   let pct = Infinity;
@@ -120,7 +127,24 @@ promisify(execFile)(bin, argv,
         refineNote = ' (auto-refine failed: ' + (e instanceof Error ? e.message : String(e)) + ')';
       }
     }
-    console.log(`[craft] DONE in ${secs}s -> ${out} (${(fs.statSync(out).size / 1e6).toFixed(1)} MB). Tray preserved/clean` + refineNote + (dom.length ? ` + ${dom.length} region colors matched (${dom.map((c) => 'rgb(' + c.map((n) => Math.round(n * 255)).join(',') + ')').join(', ')})` : '') + `. Load in Blender: File>Import>glTF 2.0.`);
+    // Optional remote paint: send mesh + reference to the free GPU host (Kaggle
+    // dual-T4) and pull back the textured GLB. 0-cost, off the M1.
+    let paintNote = '';
+    if (paintRemote) {
+      try {
+        const { runRemotePaint } = await import(new URL('../../dist/blender/paintRemote.js', import.meta.url).href);
+        console.log('[craft] sending mesh + reference to the free GPU host for painting...');
+        const pr = await runRemotePaint(out, image);
+        if (pr.ok && pr.glb) {
+          paintNote = ` + remote-painted GLB at ${pr.glb}`;
+        } else {
+          paintNote = ' + remote paint failed: ' + (pr.error || 'unknown');
+        }
+      } catch (e) {
+        paintNote = ' + remote paint error: ' + (e instanceof Error ? e.message : String(e));
+      }
+    }
+    console.log(`[craft] DONE in ${secs}s -> ${out} (${(fs.statSync(out).size / 1e6).toFixed(1)} MB). Tray preserved/clean` + refineNote + paintNote + (dom.length ? ` + ${dom.length} region colors matched (${dom.map((c) => 'rgb(' + c.map((n) => Math.round(n * 255)).join(',') + ')').join(', ')})` : '') + `. Load in Blender: File>Import>glTF 2.0.`);
   } catch (err) {
     console.warn('[craft] cleanup failed (craft itself succeeded):', err instanceof Error ? err.message : String(err));
     console.log(`[craft] DONE in ${secs}s -> ${out} (${(fs.statSync(out).size / 1e6).toFixed(1)} MB). Load via bpy_import_craft to strip the tray + color.`);
