@@ -126,9 +126,9 @@ def install():
     # '_multiarray_umath has no attribute _blas_supports_fpe'; torch 2.5 + rembg/
     # opencv expect numpy 1.x here.
     _run([sys.executable, "-m", "pip", "install", "-q", "--upgrade",
-          "numpy==1.26.4", "trimesh", "Pillow", "scipy", "rembg", "huggingface_hub", "opencv-python-headless"])
+          "numpy==1.26.4", "trimesh", "Pillow", "scipy", "rembg", "huggingface_hub"])
     # pymeshlab (mesh remesh for paint) + a couple of other likely-needed mesh/coord libs
-    _run([sys.executable, "-m", "pip", "install", "-q", "pymeshlab", "pygltflib"])
+    _run([sys.executable, "-m", "pip", "install", "-q", "pymeshlab", "pygltflib", "opencv-python-headless"])
     # RE-PIN numpy LAST: a later dep (pymeshlab/scipy/opencv) can bump numpy to 2.2+,
     # which REMOVES numpy.char and breaks diffusers (No module named 'numpy.char').
     _run([sys.executable, "-m", "pip", "install", "-q", "numpy==1.26.4"])
