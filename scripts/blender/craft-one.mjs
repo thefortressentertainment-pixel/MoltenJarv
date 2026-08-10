@@ -3,10 +3,11 @@
  * One-shot craft runner for the M1: reference photo -> real mesh GLB via the
  * native MLX Hunyuan3D binary (staged at ~/.jarv-genie/craft/).
  *
- * Usage (ONE command does the whole pipeline: craft + region-color + optional auto-refine):
- *   node scripts/blender/craft-one.mjs <image.png> [--octree N] [--quantize 4|8] [--steps N]
- *   --auto-refine N   add N mesh-sharpen rounds after the craft (recommended: 2-3)
- *   --sym             for perfectly symmetric/front-facing references (raises steps+guidance)
+ * Usage (ONE command runs the WHOLE pipeline in succession: craft + auto-octree +
+ * region-color + auto-refine sharpen; --sym for frontal refs):
+ *   node scripts/blender/craft-one.mjs <image.png>
+ *   --auto-refine N   sharpen rounds after craft (default 3; 0 to skip)
+ *   --sym             for perfectly symmetric/front-facing references
  *
  * RAM CRITICAL: the craft is a multi-GB Metal compute. It MUST run with Blender
  * (and any other memory hogs) closed. This script refuses if the Blender bridge
@@ -40,10 +41,11 @@ const quantize = flag('--quantize', 4);
 const sym = args.includes('--sym');
 const steps = sym ? flag('--steps', 60) : flag('--steps', 30);
 const guidance = sym ? 7.0 : undefined;
-// --auto-refine N: after crafting, run N headless mesh-sharpening rounds on the
+// --auto-refine N: after crafting, run N headless mesh-sharpen rounds on the
 // same mesh (smooth + subsurf-up + clean) to raise surface fidelity toward the
-// reference it was generated from.
-const refineRounds = flag('--auto-refine', 0);
+// reference it was generated from. DEFAULT 3 so a bare command runs the WHOLE
+// pipeline (craft -> region-color -> sharpen) in one go. Use --auto-refine 0 to skip.
+const refineRounds = flag('--auto-refine', 3);
 let octree = flag('--octree', 0);
 if (!explicitOctree) {
   let pct = Infinity;
