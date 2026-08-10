@@ -164,6 +164,8 @@ class _H(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         try:
             _require_auth(self.headers)
+            if self.path.rstrip("/").endswith("/ping"):
+                return self._send(200, {"status": "ok"})
             m = re.match(r"^/jobs/([^/]+)$", self.path)
             if m:
                 j = _JOBS.get(m.group(1))

@@ -132,13 +132,21 @@ promisify(execFile)(bin, argv,
     let paintNote = '';
     if (paintRemote) {
       try {
-        const { runRemotePaint } = await import(new URL('../../dist/blender/paintRemote.js', import.meta.url).href);
-        console.log('[craft] sending mesh + reference to the free GPU host for painting...');
-        const pr = await runRemotePaint(out, image);
-        if (pr.ok && pr.glb) {
-          paintNote = ` + remote-painted GLB at ${pr.glb}`;
+        const { runRemotePaint, pingRemotePaint } = await import(new URL('../../dist/blender/paintRemote.js', import.meta.url).href);
+        // FAIL-SAFE 1: configured? + tunnel reachable? clear message before any upload.
+        const ping = await pingRemotePaint();
+        if (!ping.ok) {
+          paintNote = ' + remote paint SKIPPED: ' + (ping.error || 'host unreachable');
         } else {
-          paintNote = ' + remote paint failed: ' + (pr.error || 'unknown');
+          if (ping.error) console.warn('[craft] ' + ping.error);
+          console.log(`[craft] paint host reachable (${ping.endpoint}); sending mesh + reference...`);
+          const pr = await runRemotePaint(out, image);
+          if (pr.ok && pr.glb) {
+            paintNote = ` + remote-painted GLB at ${pr.glb}`;
+          } else {
+            // FAIL-SAFE 2: paint job failed — the local crafted mesh is still valid.
+            paintNote = ' + remote paint failed: ' + (pr.error || 'unknown') + ' (the local crafted mesh is still at ' + out + ')';
+          }
         }
       } catch (e) {
         paintNote = ' + remote paint error: ' + (e instanceof Error ? e.message : String(e));

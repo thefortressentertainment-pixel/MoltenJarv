@@ -46,6 +46,30 @@ export interface PaintResult {
   detail?: string;
 }
 
+/** Pre-flight check: is remote paint configured AND the host reachable? Returns
+ *  {ok, error?} where error is a clear, actionable message (config missing vs the
+ *  tunnel/host not responding). Used as a fail-safe BEFORE a full upload. */
+export async function pingRemotePaint(): Promise<{ ok: boolean; endpoint?: string; error?: string }> {
+  const cfg = paintRemoteConfig();
+  if (!cfg) {
+    return { ok: false, error: 'Remote paint not configured. Set:  jarv-genie key set BLENDER_PAINT_URL <url>  (+ BLENDER_PAINT_TOKEN)' };
+  }
+  try {
+    const res = await fetch(`${cfg.endpoint.replace(/\/+$/, '')}/ping`, {
+      headers: authHeaders(cfg),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (res.status === 401 || res.status === 403) return { ok: true, endpoint: cfg.endpoint, error: 'warning: tunnel reachable but auth token may be wrong (check BLENDER_PAINT_TOKEN)' };
+    return { ok: res.ok, endpoint: cfg.endpoint, error: res.ok ? undefined : `remote paint host returned HTTP ${res.status}` };
+  } catch (err) {
+    return {
+      ok: false,
+      endpoint: cfg.endpoint,
+      error: `Cannot reach the paint host at ${cfg.endpoint} (${err instanceof Error ? err.message : String(err)}). Start the Kaggle cell (kaggle_notebook.py) and keep it running, then re-set BLENDER_PAINT_URL if the tunnel URL changed.`,
+    };
+  }
+}
+
 function authHeaders(cfg: PaintRemoteConfig): Record<string, string> {
   const h: Record<string, string> = { 'Content-Type': 'application/json' };
   if (cfg.token) h.Authorization = `Bearer ${cfg.token}`;
