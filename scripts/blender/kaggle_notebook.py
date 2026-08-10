@@ -224,7 +224,19 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
                         pass
             except Exception as exc:  # noqa: BLE001
                 print(f"[paint-host] low-vram cast warning: {exc}")
-        paint(mesh_path=mesh_path, image_path=ref_path, output_mesh_path=out_path, save_glb=True)
+        # paint() writes an OBJ to out_path; convert to GLB with trimesh (bpy-based
+        # convert_obj_to_glb would need bpy, which pip can't install on Kaggle).
+        obj_path = out_path  # paint writes .obj here (output_mesh_path)
+        paint(mesh_path=mesh_path, image_path=ref_path, output_mesh_path=obj_path, save_glb=False)
+        # trimesh OBJ -> GLB
+        import trimesh
+        _m = trimesh.load(obj_path, force="mesh")
+        if isinstance(_m, trimesh.Scene):
+            export = trimesh.exchange.gltf.export_glb(_m)
+            with open(out_path, "wb") as fh:
+                fh.write(export)
+        else:
+            _m.export(out_path, file_type="glb")
         _JOBS[job_id]["status"] = "done"
         _JOBS[job_id]["out"] = out_path
     except Exception as exc:  # noqa: BLE001
