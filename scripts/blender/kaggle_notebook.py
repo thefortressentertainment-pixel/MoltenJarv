@@ -127,7 +127,8 @@ def install():
     for step, args, cwd in [
         ("mesh_painter", ["bash", "compile_mesh_painter.sh"],
          os.path.join(HUNYUAN_DIR, "hy3dpaint", "DifferentiableRenderer")),
-        ("custom_rasterizer", [sys.executable, "-m", "pip", "install", "-e", "."],
+        # build_ext --inplace surfaces the REAL gcc/nvcc error (pip install -e hides it)
+        ("custom_rasterizer", [sys.executable, "setup.py", "build_ext", "--inplace"],
          os.path.join(HUNYUAN_DIR, "hy3dpaint", "custom_rasterizer")),
     ]:
         print(f"\n[paint-host {step}] running: {' '.join(args)} in {cwd}")
@@ -135,9 +136,9 @@ def install():
             r = subprocess.run(args, cwd=cwd, text=True, capture_output=True, timeout=600)
             print(f"[paint-host {step}] exit={r.returncode}")
             if r.stdout:
-                print(r.stdout[-3000:])
+                print(r.stdout[-6000:])
             if r.stderr:
-                print("[stderr] " + r.stderr[-2000:])
+                print("[stderr] " + r.stderr[-6000:])
         except Exception as exc:  # noqa: BLE001
             print(f"[paint-host {step}] failed to run: {exc}")
     print("[paint-host] =============== end build log ===============")
