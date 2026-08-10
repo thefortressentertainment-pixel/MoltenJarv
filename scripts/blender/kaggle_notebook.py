@@ -49,19 +49,50 @@ def install():
     print("[paint-host] installing Hunyuan3D-2.1 (clone + deps + compile)...")
     print("[paint-host] NOTE: first run can take ~10-20 min (clone + heavy deps + CUDA compile).")
     # --- 0) build prerequisites for the CUDA rasterizer compile -----------------
-    # Kaggle often lacks python3-config / build-essential; without them the custom
-    # rasterizer (custom_rasterizer + DifferentiableRenderer) can't compile and the
-    # paint pipeline fails. Install them first (Kaggle runs as root -> apt-get).
+    # Kaggle often lacks python3-config / build tools; without them the custom
+    # rasterizer can't compile and every paint job fails. VERIFY it exists and
+    # if apt fails, fall back to creating a python3-config shim from the python.
+    import shutil
     print("[paint-host] ensuring build tools (python3-dev, build-essential)...")
     try:
         subprocess.run(["apt-get", "update", "-qq"], check=False)
     except Exception:  # noqa: BLE001
         pass
     try:
-        subprocess.run(["apt-get", "install", "-y", "-qq", "python3-dev", "build-essential", "gcc", "g++", "ninja-build"], check=True)
-        print("[paint-host] build tools ready")
+        subprocess.run(["apt-get", "install", "-y", "-qq", "--no-install-recommends",
+                        "python3-dev", "build-essential", "gcc", "g++", "ninja-build"], check=True)
     except Exception as exc:  # noqa: BLE001
-        print(f"[paint-host] WARN: could not apt-get build tools: {exc}")
+        print(f"[paint-host] WARN: apt-get build tools failed: {exc}")
+    # Verify python3-config is now available; if not, create a shim.
+    if shutil.which("python3-config") is None:
+        print("[paint-host] python3-config still missing — creating a shim from the python binary.")
+        try:
+            py = sys.executable
+            conf_dir = os.path.expanduser("~/bin")
+            os.makedirs(conf_dir, exist_ok=True)
+            conf = os.path.join(conf_dir, "python3-config")
+            shim = (
+                "#!/usr/bin/env python3\n"
+                "import sys, sysconfig as s\n"
+                "inc = s.get_paths().get('include','')\n"
+                "lib = s.get_config_var('LIBDIR') or ''\n"
+                "ver = s.get_config_var('LDVERSION') or '3'\n"
+                "a = sys.argv[1] if len(sys.argv) > 1 else ''\n"
+                "if a in ('--includes','-I','--cflags'): out = '-I' + inc\n"
+                "elif a in ('--ldflags','--libs'): out = '-L' + lib + ' -lpython' + ver\n"
+                "elif a == '--extension-suffix': out = s.get_config_var('EXT_SUFFIX') or ''\n"
+                "else: out = (s.get_config_var('LIBS') or '') + ' ' + (s.get_config_var('SYSLIBS') or '')\n"
+                "sys.stdout.write(out + '\\n')\n"
+            )
+            with open(conf, "w") as fh:
+                fh.write(shim)
+            os.chmod(conf, 0o755)
+            if conf_dir not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = conf_dir + ":" + os.environ.get("PATH", "")
+            print(f"[paint-host] created {conf} and added ~/bin to PATH")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[paint-host] WARN: could not create python3-config shim: {exc}")
+    print(f"[paint-host] python3-config -> {shutil.which('python3-config')}")
     # setuptools + ninja help torch CUDA extensions build (esp. setup.py develop)
     try:
         subprocess.run([sys.executable, "-m", "pip", "install", "-q", "setuptools", "ninja"], check=False)
