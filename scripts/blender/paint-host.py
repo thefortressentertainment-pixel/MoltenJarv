@@ -2,43 +2,77 @@
 """
 Free-GPU paint host — run inside a 0-cost GPU notebook (Kaggle dual-T4 or Colab T4).
 This is the REMOTE side of Jarv's `bpy_paint_remote`: the M1 crafts a mesh here
-already can't paint (needs ~38GB), so it uploads the mesh+reference here; this
-notebook runs Hunyuan3D-2.1 paint (PyTorch, CUDA on the free T4, GPU+CPU offload)
-and returns the textured GLB.
+can't paint (Hunyuan3D-2.1 paint needs ~21GB VRAM), so it uploads the mesh +
+reference here; this notebook runs Hunyuan3D-2.1 Hunyuan3DPaintPipeline (PyTorch,
+CUDA on the free T4) and returns the textured GLB.
 
-Usage (in a Kaggle/Colab cell):
-  1. Leave ACCELERATOR=GPU when writing the cell.
-  2. `!pip install -q fastapi uvicorn python-multipart pyngrok` (Kaggle) or use the
-     Colab-copied version of the M1's craft client info.
-  3. Copy THIS file into the notebook, then run:  paint_host.start()
-  4. Expose port 8000 with a tunnel (ngrok) and set on the M1:
-        jarv-genie key set BLENDER_PAINT_URL <https://xxxx.ngrok-free.app>
-        jarv-genie key set BLENDER_PAINT_TOKEN <your-token>
+Usage (one notebook cell — Kaggle with GPU accelerator, dual T4 = 32GB fits 21GB;
+single T4 Colab may need --low_vram):
+    import subprocess, paint_host
+    # setup (first run only: clone + deps + compile rasterizer + weights)
+    paint_host.install()
+    paint_host.HUNYUAN_DIR = "/kaggle/working/Hunyuan3D-2.1"
+    paint_host.start()
 
-The M1 then sends the mesh GLB + reference and gets back /tmp/jarv_painted.glb.
+Expose port 8000 with a free tunnel (ngrok/cloudflared/Tailscale) and set on the M1:
+    jarv-genie key set BLENDER_PAINT_URL <https://tunnel>
+    jarv-genie key set BLENDER_PAINT_TOKEN <your-token>
 
-LICENSE: MIT (adapted for Jarv's Blender Branch). Running Hunyuan3D-2.1 requires
-downloading its weights (Tencent-Hunyuan/Hunyuan3D-2.1, MIT) on the notebook.
+The M1 then POSTs mesh GLB + reference and downloads /tmp/jarv_painted.glb.
+
+LICENSE: MIT (adapted for Jarv's Blender Branch). Hunyuan3D-2.1 weights are MIT
+(Tencent-Hunyuan); shapes+textures at 10GB/21GB VRAM respectively.
 """
 
 import json
 import os
+import subprocess
+import sys
 import time
 import threading
 import tempfile
-import urllib.request
 
 # --- tunables ---------------------------------------------------------------
 HOST = "0.0.0.0"
 PORT = 8000
 AUTH_TOKEN = os.environ.get("BLENDER_PAINT_TOKEN", "jarv-paint-dev")
-# Hunyuan3D-2.1 paint weights (HF repo). Download once on the notebook via:
-#   git clone https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1
-#   huggingface-cli download tencent/Hunyuan3D-2.1 --local-dir hunyuan3d/weights
 HUNYUAN_GIT = "https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1.git"
+HUNYUAN_DIR = ""  # set to /kaggle/working/Hunyuan3D-2.1 (or wherever cloned)
+MAX_NUM_VIEW = 6
+RESOLUTION = 512
+# Paint needs ~21GB VRAM. On a single 16GB T4, enable lower-vram dtype/offload.
+LOW_VRAM = os.environ.get("BLENDER_PAINT_LOW_VRAM", "0") == "1"
 
 _JOBS = {}  # job_id -> {"status", "out": path}
 _job_counter = [0]
+
+
+def install():
+    """One-time setup of Hunyuan3D-2.1 on the notebook. Run once, then start()."""
+    print("[paint-host] setting up Hunyuan3D-2.1 (clone + deps + compile + weights)...")
+    if not os.path.isdir(os.path.join(os.getcwd(), "Hunyuan3D-2.1")):
+        subprocess.run(["git", "clone", HUNYUAN_GIT, "Hunyuan3D-2.1"], check=True)
+    global HUNYUAN_DIR
+    HUNYUAN_DIR = os.path.join(os.getcwd(), "Hunyuan3D-2.1")
+    os.chdir(HUNYUAN_DIR)
+    # PyTorch CUDA build + the repo requirements
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "torch==2.5.1",
+                    "torchvision==0.20.1", "torchaudio==2.5.1",
+                    "--index-url", "https://download.pytorch.org/whl/cu124"], check=False)
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", "requirements.txt"], check=False)
+    # compile the paint rasterizer (required for texture baking)
+    subprocess.run(["bash", "compile_mesh_painter.sh"], cwd=os.path.join(HUNYUAN_DIR, "hy3dpaint", "DifferentiableRenderer"), check=False)
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-e", "."],
+                   cwd=os.path.join(HUNYUAN_DIR, "hy3dpaint", "custom_rasterizer"), check=False)
+    # Real-ESRGAN upsampler checkpoint for the texture super-resolution stage
+    ckpt_dir = os.path.join(HUNYUAN_DIR, "hy3dpaint", "ckpt")
+    os.makedirs(ckpt_dir, exist_ok=True)
+    ckpt = os.path.join(ckpt_dir, "RealESRGAN_x4plus.pth")
+    if not os.path.exists(ckpt):
+        subprocess.run(["wget", "-q",
+                        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
+                        "-P", ckpt_dir], check=False)
+    print("[paint-host] setup done. Weights are downloaded on first paint call (tencent/Hunyuan3D-2.1).")
 
 
 def _gen_id():
@@ -53,20 +87,25 @@ def _require_auth(headers):
 
 
 def _run_paint(job_id, mesh_path, ref_path, out_path):
-    """Run Hunyuan3D-2.1 paint on a free T4 with CPU offload. Best-effort: the exact
-    API is version-dependent; adapt to the installed Hunyuan3D-2.1 checkout."""
+    """Run the verified Hunyuan3D-2.1 paint flow on the free T4. Authoritative API:
+       paint_pipeline = Hunyuan3DPaintPipeline(Hunyuan3DPaintConfig(max_num_view=6, resolution=512))
+       paint_pipeline(mesh_path=..., image_path=..., output_mesh_path=..., save_glb=True)
+    (paint uses ~21GB VRAM -> dual-T4 Kaggle fits; LOW_VRAM lowers dtype on single T4.)"""
     try:
-        import sys
-        sys.path.insert(0, os.path.join(os.getcwd(), "Hunyuan3D-2.1"))
-        from hy3dgen.rembg import BackgroundRemover
-        from hy3dgen.texgen import Hunyuan3DTexGen
-
-        texgen = Hunyuan3DTexGen()
+        sys.path.insert(0, HUNYUAN_DIR)
+        sys.path.insert(0, os.path.join(HUNYUAN_DIR, "hy3dpaint"))
+        from textureGenPipeline import Hunyuan3DPaintConfig, Hunyuan3DPaintPipeline
         _JOBS[job_id]["status"] = "running"
-        # The backend paints the existing mesh's UV with the reference image.
-        # (Adjust to the installed API: forward(prompt/image, mesh) -> new mesh.)
-        mesh = texgen.forward(ref_path, mesh_path)
-        # Save as GLB
+        config = Hunyuan3DPaintConfig(max_num_view=MAX_NUM_VIEW, resolution=RESOLUTION)
+        paint = Hunyuan3DPaintPipeline(config)
+        if LOW_VRAM:
+            try:
+                for name in paint.models:
+                    paint.models[name] = getattr(paint.models[name], "half", lambda: paint.models[name])()
+            except Exception:
+                pass
+        # Writes a textured GLB to out_path when save_glb=True
+        paint(mesh_path=mesh_path, image_path=ref_path, output_mesh_path=out_path, save_glb=True)
         _JOBS[job_id]["status"] = "done"
         _JOBS[job_id]["out"] = out_path
     except Exception as exc:  # noqa: BLE001
