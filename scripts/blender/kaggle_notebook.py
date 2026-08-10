@@ -326,13 +326,14 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
                         try:
                             _img_arr = _mu_np.asarray(texture)
                             _img_arr = (_img_arr * 255.0).astype(_mu_np.uint8)
+                            if _img_arr.ndim == 2:
+                                _img_arr = _img_arr[:, :, None]
                             if _img_arr.shape[-1] == 1:
                                 _img_arr = _mu_np.repeat(_img_arr, 3, axis=-1)
-                            if _img_arr.shape[-1] == 4:
+                            if _img_arr.shape[-1] >= 3:
                                 _img_arr = _img_arr[..., :3]
                             _pil_from = __import__("PIL.Image", fromlist=["Image"]).Image
-                            _pil_img = _pil_from.fromarray(_img_arr[:, :, ::-1])  # -> RGB
-                            _mat_kw = {}
+                            _pil_img = _pil_from.fromarray(_img_arr[:, :, ::-1].copy())  # BGR->RGB
                             try:
                                 from trimesh.visual.material import PBRMaterial
                                 _mat = PBRMaterial(baseColorTexture=_pil_img)
@@ -340,8 +341,9 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
                                 _mat = _pil_img
                             from trimesh.visual.texture import TextureVisuals
                             mesh.visual = TextureVisuals(uv=vtx_uv, image=_pil_img, material=_mat)
-                        except Exception:
-                            pass
+                            print(f"[paint-host] save_mesh attached painted texture {_pil_img.size} uv={vtx_uv.shape}")
+                        except Exception as _tex_err:
+                            print(f"[paint-host] save_mesh texture attach FAILED: {_tex_err}")
                     if mesh_path.lower().endswith(".glb"):
                         mesh.export(mesh_path, file_type="glb")
                     else:
@@ -589,19 +591,12 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
                         pass
             except Exception as exc:  # noqa: BLE001
                 print(f"[paint-host] low-vram cast warning: {exc}")
-        # paint() writes an OBJ to out_path; convert to GLB with trimesh (bpy-based
-        # convert_obj_to_glb would need bpy, which pip can't install on Kaggle).
-        obj_path = out_path  # paint writes .obj here (output_mesh_path)
+        # paint() internally calls render.save_mesh -> our bpy-free mesh_utils.save_mesh,
+        # which writes out_path directly as a GLB WITH the painted diffuse texture
+        # attached (TextureVisuals). Trust that output; do NOT reload+re-export through
+        # trimesh here — that round-trip is where the material/texture goes AWOL.
+        obj_path = out_path  # out_path already ends .glb; save_mesh exports a GLB
         paint(mesh_path=mesh_path, image_path=ref_path, output_mesh_path=obj_path, save_glb=False)
-        # trimesh OBJ -> GLB
-        import trimesh
-        _m = trimesh.load(obj_path, force="mesh")
-        if isinstance(_m, trimesh.Scene):
-            export = trimesh.exchange.gltf.export_glb(_m)
-            with open(out_path, "wb") as fh:
-                fh.write(export)
-        else:
-            _m.export(out_path, file_type="glb")
         _JOBS[job_id]["status"] = "done"
         _JOBS[job_id]["out"] = out_path
     except Exception as exc:  # noqa: BLE001
