@@ -126,3 +126,13 @@ installs ~15 min).
 - Full traceback beats summary: rely on `format_exc()` in the job error.
 - Any silent failure (no error but wrong output) should be converted to a loud assertion
   (gate) before re-running, so we stop guessing.
+
+10. `save_mesh texture attach FAILED: type object 'Image' has no attribute 'fromarray'`
+    -> This was the REAL silent root cause for the unpainted GLB for many cycles.
+       `__import__("PIL.Image", fromlist=["Image"]).Image` returns the PIL.Image MODULE
+       (the fromlist item), not the Image class, so `.Image.fromarray` doesn't exist;
+       the except set attached=False and a bare GLB was exported with no error.
+    -> Use `from PIL.Image import fromarray` (or `import PIL.Image; PIL.Image.fromarray`).
+       Verify with the job's `[paint-host] save_mesh TEXTURE:` line that texture is non-None
+       and the `[paint-host] save_mesh attached painted texture <WxH> uv=<N,2>` + the
+       `save_mesh GLB gate: material=True texcoord=True` lines.
