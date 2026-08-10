@@ -287,12 +287,26 @@ def _ensure_cloudflared():
 # (so you can copy it while Hunyuan3D-2.1 installs in the background). The paint
 # stage becomes ready once install() completes and the first job runs.
 print(">> Starting paint HTTP server + free tunnel (you'll get the URL in ~seconds)...")
-server_thread = threading.Thread(
-    target=lambda: ThreadingHTTPServer((HOST, PORT), _H).serve_forever(),
-    daemon=True,
-)
-server_thread.start()
-print(f"[paint-host] HTTP server listening on :{PORT} (token {AUTH_TOKEN})")
+# If port 8000 is already bound (previous session's server thread still alive), reuse
+# it instead of erroring "Address already in use" and double-tunneling.
+def _server_listening():
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(1)
+        return s.connect_ex(("127.0.0.1", PORT)) == 0
+    except Exception:  # noqa: BLE001
+        return False
+
+if _server_listening():
+    print(f"[paint-host] server already listening on :{PORT} — reusing it.")
+else:
+    server_thread = threading.Thread(
+        target=lambda: ThreadingHTTPServer((HOST, PORT), _H).serve_forever(),
+        daemon=True,
+    )
+    server_thread.start()
+    print(f"[paint-host] HTTP server listening on :{PORT} (token {AUTH_TOKEN})")
 
 def _open_tunnel():
     exe = _ensure_cloudflared()
