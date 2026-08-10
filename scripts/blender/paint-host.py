@@ -138,6 +138,7 @@ class _H(BaseHTTPRequestHandler):
         data = self.rfile.read(length)
         fields = {}
         for part in data.split(b"--" + boundary):
+            part = part.lstrip(b"\r\n")
             if part.startswith(b"Content-Disposition"):
                 head, _, body = part.partition(b"\r\n\r\n")
                 head = head.decode(errors="ignore")
@@ -201,10 +202,71 @@ class _H(BaseHTTPRequestHandler):
             return self._send(500, {"error": str(exc)})
 
 
-def start():
-    print(f"[paint-host] listening on {HOST}:{PORT} (token: {AUTH_TOKEN})")
-    print("[paint-host] run a tunnel (ngrok http 8000) and set BLENDER_PAINT_URL on the M1.")
-    ThreadingHTTPServer((HOST, PORT), _H).serve_forever()
+def _ensure_cloudflared():
+    """Download a platform-appropriate cloudflared binary (free, no token) so a
+    notebook cell can open a trycloudflare.com tunnel without an interactive shell.
+    Returns the binary path or None."""
+    import platform, urllib.request, zipfile, shutil
+    bin_dir = os.path.join(os.path.expanduser("~"), "bin")
+    os.makedirs(bin_dir, exist_ok=True)
+    exe = os.path.join(bin_dir, "cloudflared" + (".exe" if platform.system() == "Windows" else ""))
+    if os.path.exists(exe):
+        return exe
+    arch = "amd64" if platform.machine().lower() in ("x86_64", "amd64") else "arm64"
+    os_name = platform.system().lower()  # windows/linux/darwin
+    base = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared"
+    url = f"{base}-{os_name}-{arch}"
+    tmp = exe + ".zip" if os_name == "windows" else exe
+    try:
+        print("[tunnel] downloading cloudflared...")
+        if os_name == "windows":
+            urllib.request.urlretrieve(url + ".exe", tmp)  # noqa: S310
+            with zipfile.ZipFile(tmp, "r") as z:
+                z.extractall(bin_dir)
+            os.remove(tmp)
+        else:
+            subprocess.run(["curl", "-sL", "-o", exe, url], check=True)
+            os.chmod(exe, 0o755)
+        return exe
+    except Exception as exc:  # noqa: BLE001
+        print(f"[tunnel] cloudflared download failed: {exc}")
+        return None
+
+
+def start(tunnel=True):
+    """Start the paint HTTP server, then (if tunnel) open a free trycloudflare.com
+    tunnel and print its public URL. Copy that URL to BLENDER_PAINT_URL on the M1:
+        jarv-genie key set BLENDER_PAINT_URL https://xxxx.trycloudflare.com
+        jarv-genie key set BLENDER_PAINT_TOKEN <AUTH_TOKEN>"""
+    def _serve():
+        print(f"[paint-host] listening on {HOST}:{PORT} (token: {AUTH_TOKEN})")
+        ThreadingHTTPServer((HOST, PORT), _H).serve_forever()
+
+    threading.Thread(target=_serve, daemon=True).start()
+    if not tunnel:
+        print("[paint-host] server started; expose port manually.")
+        return
+    exe = _ensure_cloudflared()
+    if not exe:
+        print("[paint-host] could not get a tunnel; expose port 8000 manually.")
+        return
+    print("[tunnel] opening trycloudflare.com tunnel to port 8000 (keep this cell running)...")
+    proc = subprocess.Popen([exe, "tunnel", "--url", f"http://localhost:{PORT}"],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    import re
+    for line in proc.stdout:
+        m = re.search(r"https://[a-z0-9-]+\.trycloudflare\.com", line)
+        if m:
+            print("\n===== COPY THIS URL TO BLENDER_PAINT_URL ON THE M1 =====\n"
+                  f"  https://blender-paint → {m.group(0)}\n"
+                  "  jarv-genie key set BLENDER_PAINT_URL " + m.group(0) + "\n"
+                  "  jarv-genie key set BLENDER_PAINT_TOKEN " + AUTH_TOKEN + "\n"
+                  "=======================================================\n")
+    # keep the process alive once the loop ends (cloudflared silenced)
+    try:
+        proc.wait()
+    except KeyboardInterrupt:
+        proc.terminate()
 
 
 if __name__ == "__main__":
