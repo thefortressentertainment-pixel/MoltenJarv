@@ -105,6 +105,13 @@ def install():
         except Exception as exc:  # noqa: BLE001
             print(f"[paint-host] WARN: git clone failed: {exc}")
     HUNYUAN_DIR = os.path.join(os.getcwd(), "Hunyuan3D-2.1")
+    # A prior session's clone sometimes nested an inner 'Hunyuan3D-2.1' dir. If
+    # hy3dpaint isn't directly under HUNYUAN_DIR but is under an inner copy, descend.
+    if not os.path.isdir(os.path.join(HUNYUAN_DIR, "hy3dpaint")):
+        _inner = os.path.join(HUNYUAN_DIR, "Hunyuan3D-2.1")
+        if os.path.isdir(os.path.join(_inner, "hy3dpaint")):
+            print(f"[paint-host] nested repo detected; using {_inner}")
+            HUNYUAN_DIR = _inner
     if not os.path.isdir(HUNYUAN_DIR):
         print("[paint-host] WARN: Hunyuan3D-2.1 dir missing; paint will fail but tunnel still starts.")
         return
@@ -290,11 +297,21 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
             print(f"[paint-host] bpy stub error: {exc}")
         sys.path.insert(0, HUNYUAN_DIR)
         sys.path.insert(0, os.path.join(HUNYUAN_DIR, "hy3dpaint"))
-        # The paint loads resources via RELATIVE paths (e.g. 'ckpt/RealESRGAN_x4plus.pth').
-        # Install() chdir'd away, so chdir back into hy3dpaint so those resolve.
+        # The paint resolves resources/relative to the REPO ROOT: it wants
+        #   <root>/hy3dpaint/cfgs/xxx.yaml  and  <root>/ckpt/RealESRGAN_x4plus.pth
+        # chdir to HUNYUAN_DIR (repo root) and expose ckpt there (from hy3dpaint/ckpt).
         try:
-            os.chdir(os.path.join(HUNYUAN_DIR, "hy3dpaint"))
-            print("[paint-host] cwd -> hy3dpaint (relative resource paths will resolve)")
+            os.chdir(HUNYUAN_DIR)
+            _src_ckpt = os.path.join(HUNYUAN_DIR, "hy3dpaint", "ckpt")
+            _dst_ckpt = os.path.join(HUNYUAN_DIR, "ckpt")
+            if os.path.isdir(_src_ckpt) and not os.path.isdir(_dst_ckpt):
+                # symlink the whole ckpt dir so the SR loader finds RealESRGAN_x4plus.pth
+                try:
+                    os.symlink(_src_ckpt, _dst_ckpt)
+                except Exception:  # noqa: BLE001
+                    import shutil as _cs
+                    _cs.copytree(_src_ckpt, _dst_ckpt)
+            print(f"[paint-host] cwd -> {HUNYUAN_DIR} (repo root)")
         except Exception as exc:  # noqa: BLE001
             print(f"[paint-host] cwd set warn: {exc}")
         from textureGenPipeline import Hunyuan3DPaintConfig, Hunyuan3DPaintPipeline
