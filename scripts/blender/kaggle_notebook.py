@@ -35,8 +35,12 @@ PORT = 8000
 AUTH_TOKEN = "jarv-paint-dev"
 HUNYUAN_GIT = "https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1.git"
 HUNYUAN_DIR = ""          # filled by install()
-MAX_NUM_VIEW = 6
-RESOLUTION = 512
+MAX_NUM_VIEW = int(os.environ.get("BLENDER_PAINT_MAX_VIEW", "8"))
+RESOLUTION = int(os.environ.get("BLENDER_PAINT_RESOLUTION", "768"))
+# Face budget the paint's remesh keeps from the crafted mesh. Craft is ~180k verts;
+# stock 40k collapses detail into the "chiseled/crumpled" look. Env-overridable:
+# BLENDER_PAINT_TARGET_FACES (e.g. 180000) to keep nearly all crafted geometry.
+PAINT_TARGET_FACES = int(os.environ.get("BLENDER_PAINT_TARGET_FACES", "180000"))
 LOW_VRAM = os.environ.get("BLENDER_PAINT_LOW_VRAM", "0") == "1"
 
 _JOBS = {}
@@ -590,7 +594,7 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
                         "    mesh_simplify_trimesh(mesh_path, remesh_path)\n"
                         "\n"
                         "\n"
-                        "def mesh_simplify_trimesh(inputpath, outputpath, target_count=40000):\n"
+                        "def mesh_simplify_trimesh(inputpath, outputpath, target_count={tf}):\n"
                         "    ms = pymeshlab.MeshSet()\n"
                         "    if inputpath.endswith(\".glb\"):\n"
                         "        ms.load_new_mesh(inputpath, load_in_a_single_layer=True)\n"
@@ -609,8 +613,8 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
                         "    courent.export(outputpath)\n"
                     )
                     with open(_smu, "w") as _fh:
-                        _fh.write(_fixed)
-                    print("[paint-host] rewrote simplify_mesh_utils.py for fast_simplification ratio API")
+                        _fh.write(_fixed.format(tf=PAINT_TARGET_FACES))
+                    print(f"[paint-host] rewrote simplify_mesh_utils.py for fast_simplification ratio API (target_faces={PAINT_TARGET_FACES})")
             else:
                 print("[paint-host] WARN simplify_mesh_utils.py not found at", _smu)
         except Exception as exc:  # noqa: BLE001
