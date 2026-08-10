@@ -343,6 +343,91 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
                 _mu.modules["hy3dpaint.DifferentiableRenderer.mesh_utils"] = _m
         except Exception:  # noqa: BLE001
             pass
+        # MeshRender imports `from .mesh_inpaint_processor import meshVerticeInpaint`
+        # from mesh_inpaint_processor.{cpp,so} (compiled by compile_mesh_painter.sh).
+        # If that CPU C++ build isn't importable on Kaggle the import fails silently and
+        # meshVerticeInpaint is left undefined -> NameError in uv_inpaint. Port the C++
+        # "smooth" algorithm to numpy and expose the same contract (texture[H,W,C],
+        # mask[H,W] uint8 -> (new_texture[H,W,C], new_mask[H,W] uint8)).
+        try:
+            import sys as _mp_, types as _mpt_
+            import numpy as _mp_np
+            if "DifferentiableRenderer.mesh_inpaint_processor" not in _mp_.modules:
+                def _mp_inpaint(texture, mask, vtx_pos, vtx_uv, pos_idx, uv_idx, method="smooth"):
+                    tex = _mp_np.asarray(texture, dtype=_mp_np.float32)
+                    msk = _mp_np.asarray(mask)
+                    H, W, C = tex.shape[0], tex.shape[1], tex.shape[2]
+                    vp = _mp_np.asarray(vtx_pos, dtype=_mp_np.float32)
+                    vu = _mp_np.asarray(vtx_uv, dtype=_mp_np.float32)
+                    pi = _mp_np.asarray(pos_idx, dtype=_mp_np.int64)
+                    ui = _mp_np.asarray(uv_idx, dtype=_mp_np.int64)
+                    N = vp.shape[0]
+
+                    def uv_of(vi):
+                        v = int(round(vu[vi, 0] * (W - 1)))
+                        u = int(round((1.0 - vu[vi, 1]) * (H - 1)))
+                        u = max(0, min(H - 1, u)); v = max(0, min(W - 1, v))
+                        return u, v
+
+                    vmask = _mp_np.zeros(N, dtype=_mp_np.float32)
+                    vcol = _mp_np.zeros((N, C), dtype=_mp_np.float32)
+                    uncolored = []
+                    for i in range(pi.shape[0]):
+                        for k in range(3):
+                            vi = int(pi[i, k]); ui_k = int(ui[i, k])
+                            u, v = uv_of(ui_k)
+                            if msk[u, v] > 0:
+                                vmask[vi] = 1.0
+                                vcol[vi] = tex[u, v]
+                            else:
+                                uncolored.append(vi)
+                    # adjacency graph
+                    G = [[] for _ in range(N)]
+                    for i in range(pi.shape[0]):
+                        for k in range(3):
+                            G[int(pi[i, k])].append(int(pi[i, (k + 1) % 3]))
+                    # distance-weighted smoothing
+                    iters = 0
+                    while iters < 200:
+                        iters += 1
+                        changed = False
+                        for vi in uncolored:
+                            if vmask[vi] > 0:
+                                continue
+                            s = _mp_np.zeros(C, dtype=_mp_np.float32); tw = 0.0
+                            v0 = vp[vi]
+                            for nb in G[vi]:
+                                if vmask[nb] > 0:
+                                    d = _mp_np.sqrt(float(_mp_np.dot(v0 - vp[nb], v0 - vp[nb])))
+                                    w = 1.0 / max(d, 1e-4); w = w * w
+                                    s += vcol[nb] * w; tw += w
+                            if tw > 0:
+                                vcol[vi] = s / tw
+                                vmask[vi] = 1.0
+                                changed = True
+                        if not changed:
+                            break
+                    out_t = tex.copy(); out_m = msk.copy()
+                    for i in range(pi.shape[0]):
+                        for k in range(3):
+                            vi = int(pi[i, k]); ui_k = int(ui[i, k])
+                            if vmask[vi] == 1.0:
+                                u, v = uv_of(ui_k)
+                                out_t[u, v] = vcol[vi]
+                                out_m[u, v] = 255
+                    return out_t, out_m
+
+                def _mp_color(texture, mask, vtx_pos, vtx_uv, pos_idx, uv_idx, method="smooth"):
+                    N = _mp_np.asarray(vtx_pos).shape[0]
+                    return _mp_np.zeros((N, 3), dtype=_mp_np.float32), _mp_np.zeros(N, dtype=_mp_np.uint8)
+
+                _mip_ = _mpt_.ModuleType("DifferentiableRenderer.mesh_inpaint_processor")
+                _mip_.meshVerticeInpaint = _mp_inpaint
+                _mip_.meshVerticeColor = _mp_color
+                _mp_.modules["DifferentiableRenderer.mesh_inpaint_processor"] = _mip_
+                _mp_.modules["hy3dpaint.DifferentiableRenderer.mesh_inpaint_processor"] = _mip_
+        except Exception:  # noqa: BLE001
+            pass
         try:
             import sys as _s2, types as _types
             if "bpy" not in _s2.modules:
