@@ -1,11 +1,17 @@
-# Kaggle config is done (GPU T4x2 + Internet ON). Paste ALL of this into ONE cell & run.
-# It downloads the paint-host notebook from your MoltenJarv GitHub and RUNS it,
-# so the HTTP server starts, a free trycloudflare tunnel opens, and the URL prints.
-import requests, subprocess, sys
-URL = 'https://raw.githubusercontent.com/thefortressentertainment-pixel/MoltenJarv/main/scripts/blender/kaggle_notebook.py'
-r = requests.get(URL)
+# Kaggle config: GPU T4x2 + Internet ON. Paste this WHOLE cell and run it.
+# It downloads the LATEST paint-host notebook from your MoltenJarv GitHub
+# (with a cache-buster so it's never stale) and runs it.
+import time, requests, sys
+URL = ('https://raw.githubusercontent.com/thefortressentertainment-pixel/MoltenJarv/'
+       'main/scripts/blender/kaggle_notebook.py?v=' + str(int(time.time())))
+r = requests.get(URL, headers={'Cache-Control': 'no-cache', 'Pragma': 'no-cache'})
 assert r.status_code == 200, 'fetch failed: ' + str(r.status_code)
 code = r.text
-print('[kaggle-cell] fetched kaggle_notebook.py', len(code), 'chars; executing...')
-gw = {}
-exec(compile(code, 'kaggle_notebook.py', 'exec'), gw)
+print('[kaggle-cell] fetched', len(code), 'chars')
+# SELF-CHECK: confirm this is the FIXED build (must contain the shim marker).
+if 'python3-config shim' not in code and 'creating a shim' not in code:
+    print('[kaggle-cell] WARNING: fetched notebook does NOT contain the python3-config fix.')
+    print('[kaggle-cell] This old build will NOT compile the rasterizer. Check internet/GitHub.')
+else:
+    print('[kaggle-cell] OK: fixed notebook (python3-config shim present).')
+exec(compile(code, 'kaggle_notebook.py', 'exec'), {})

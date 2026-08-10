@@ -123,10 +123,24 @@ def install():
 
     # --- compile the custom CUDA rasterizers (REQUIRED for paint) ---------------
     print("[paint-host] compiling mesh painter (DifferentiableRenderer + custom_rasterizer)...")
-    _run(["bash", "compile_mesh_painter.sh"],
-         cwd=os.path.join(HUNYUAN_DIR, "hy3dpaint", "DifferentiableRenderer"))
-    _run([sys.executable, "-m", "pip", "install", "-q", "-e", "."],
-         cwd=os.path.join(HUNYUAN_DIR, "hy3dpaint", "custom_rasterizer"))
+    print("[paint-host] OUTPUT BELOW IS THE BUILD LOG (scroll past this to see the result) ===========")
+    for step, args, cwd in [
+        ("mesh_painter", ["bash", "compile_mesh_painter.sh"],
+         os.path.join(HUNYUAN_DIR, "hy3dpaint", "DifferentiableRenderer")),
+        ("custom_rasterizer", [sys.executable, "-m", "pip", "install", "-e", "."],
+         os.path.join(HUNYUAN_DIR, "hy3dpaint", "custom_rasterizer")),
+    ]:
+        print(f"\n[paint-host {step}] running: {' '.join(args)} in {cwd}")
+        try:
+            r = subprocess.run(args, cwd=cwd, text=True, capture_output=True, timeout=600)
+            print(f"[paint-host {step}] exit={r.returncode}")
+            if r.stdout:
+                print(r.stdout[-3000:])
+            if r.stderr:
+                print("[stderr] " + r.stderr[-2000:])
+        except Exception as exc:  # noqa: BLE001
+            print(f"[paint-host {step}] failed to run: {exc}")
+    print("[paint-host] =============== end build log ===============")
 
     # --- verify the rasterizer actually built, else paint can't run --------------
     built = False
