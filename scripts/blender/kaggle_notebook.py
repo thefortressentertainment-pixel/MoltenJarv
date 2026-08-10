@@ -350,6 +350,21 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
                         if attached:
                             _scene = mesh.scene()
                             _scene.export(mesh_path, file_type="glb")
+                            # Ground-truth gate: a textured GLB MUST carry a material
+                            # and a TEXCOORD. If it doesn't, fail loudly instead of
+                            # returning a bare-mesh GLB that looks unpainted in Blender.
+                            _check = open(mesh_path, "rb").read()
+                            _jlen = int(_check[12:16][::-1].hex(), 16)
+                            _j = _check[20:20 + _jlen].decode("utf8", "replace")
+                            import re as _mr
+                            _has_mat = _mr.search(r'"materials"\s*:\s*\[', _j) is not None
+                            _has_tex = _mr.search(r'"TEXCOORD_0"', _j) is not None
+                            print(f"[paint-host] save_mesh GLB gate: material={_has_mat} texcoord={_has_tex} size={len(_check)}")
+                            if not (_has_mat and _has_tex):
+                                raise RuntimeError(
+                                    f"textured GLB export dropped texture (material={_has_mat} texcoord={_has_tex}); "
+                                    f"texture arr shape={_mu_np.asarray(texture).shape} uv={None if vtx_uv is None else vtx_uv.shape}"
+                                )
                         else:
                             mesh.export(mesh_path, file_type="glb")
                     else:
