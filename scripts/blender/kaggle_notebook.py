@@ -325,6 +325,19 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
                     # material ONLY (no image kwarg), and the mesh MUST be exported via
                     # a Scene (a bare Trimesh GLB export is known to drop the texture).
                     attached = False
+                    # ---- unconditional diagnostic: what did the paint actually hand us? ----
+                    try:
+                        _tex_desc = "None" if texture is None else f"{_mu_np.asarray(texture).shape} {_mu_np.asarray(texture).dtype} min={_mu_np.asarray(texture).min():.3f} max={_mu_np.asarray(texture).max():.3f}"
+                    except Exception as _e2:
+                        _tex_desc = f"uninspected ({_e2})"
+                    _uv_desc = "None" if vtx_uv is None else f"{_mu_np.asarray(vtx_uv).shape}"
+                    print(f"[paint-host] save_mesh TEXTURE: {_tex_desc}; UV: {_uv_desc}; faces={None if pos_idx is None else _mu_np.asarray(pos_idx).shape}")
+                    if texture is None:
+                        raise RuntimeError(
+                            "save_mesh got texture=None — the paint pipeline did NOT produce a diffuse texture "
+                            "(MeshRender.self.tex unset). Can't build a textured GLB; fix the paint texture bake upstream. "
+                            f"UV={_uv_desc} faces={None if pos_idx is None else _mu_np.asarray(pos_idx).shape}"
+                        )
                     # trimesh SILENTLY drops UV/textures when pillow isn't importable
                     # (mikedh/trimesh#2333) — no warning, just a bare-mesh GLB. Probe it
                     # here so that case fails loudly instead of shipping an unpainted mesh.
