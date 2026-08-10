@@ -3,8 +3,10 @@
  * One-shot craft runner for the M1: reference photo -> real mesh GLB via the
  * native MLX Hunyuan3D binary (staged at ~/.jarv-genie/craft/).
  *
- * Usage:
- *   node scripts/blender/craft-one.mjs <image.png> [--octree 256] [--quantize 4]
+ * Usage (ONE command does the whole pipeline: craft + region-color + optional auto-refine):
+ *   node scripts/blender/craft-one.mjs <image.png> [--octree N] [--quantize 4|8] [--steps N]
+ *   --auto-refine N   add N mesh-sharpen rounds after the craft (recommended: 2-3)
+ *   --sym             for perfectly symmetric/front-facing references (raises steps+guidance)
  *
  * RAM CRITICAL: the craft is a multi-GB Metal compute. It MUST run with Blender
  * (and any other memory hogs) closed. This script refuses if the Blender bridge
@@ -24,7 +26,7 @@ const weights = path.join(root, 'weights', 'shape-small');
 const args = process.argv.slice(2);
 const image = args.find((a) => !a.startsWith('--'));
 if (!image) {
-  console.error('usage: craft-one.mjs <image.png> [--octree N] [--quantize 4|8] [--steps N]');
+  console.error('usage: craft-one.mjs <image.png> [--octree N] [--quantize 4|8] [--steps N] [--auto-refine N] [--sym]');
   process.exit(2);
 }
 const flag = (k, d) => { const i = args.indexOf(k); return i >= 0 ? Number(args[i + 1]) : d; };
