@@ -214,18 +214,29 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
         try:
             import sys as _s2, types as _types
             if "bpy" not in _s2.modules:
-                _stub = _types.ModuleType("bpy")
-                _stub.app = _types.ModuleType("bpy.app")
-                _stub.app.version = (4, 0, 0)
                 class _Dummy:
                     def __getattr__(self, k):
                         return _Dummy()
+                    def __getitem__(self, k):
+                        return _Dummy()
                     def __call__(self, *a, **k):
                         return _Dummy()
+                _stub = _types.ModuleType("bpy")
+                _stub.app = _types.ModuleType("bpy.app"); _stub.app.version = (4, 0, 0)
                 _stub.data = _Dummy(); _stub.context = _Dummy(); _stub.ops = _Dummy()
+                _stub.utils = _Dummy(); _stub.path = _Dummy(); _stub.types = _Dummy(); _stub.props = _Dummy()
                 _s2.modules["bpy"] = _stub
-        except Exception:  # noqa: BLE001
-            pass
+                _s2.modules["bpy.data"] = _stub.data
+                _s2.modules["bpy.context"] = _stub.context
+                _s2.modules["bpy.ops"] = _stub.ops
+                _s2.modules["bpy.app"] = _stub.app
+                _s2.modules["bpy.utils"] = _stub.utils
+                _s2.modules["bpy.path"] = _stub.path
+                _s2.modules["bpy.types"] = _stub.types
+                _s2.modules["bpy.props"] = _stub.props
+            print("[paint-host] bpy stub:", "applied" if "bpy" in _s2.modules else "MISSING")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[paint-host] bpy stub error: {exc}")
         sys.path.insert(0, HUNYUAN_DIR)
         sys.path.insert(0, os.path.join(HUNYUAN_DIR, "hy3dpaint"))
         from textureGenPipeline import Hunyuan3DPaintConfig, Hunyuan3DPaintPipeline
