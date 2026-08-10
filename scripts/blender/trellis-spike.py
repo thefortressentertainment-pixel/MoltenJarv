@@ -17,7 +17,6 @@ os.environ["ATTN_BACKEND"] = "xformers"
 import gc
 import subprocess
 import sys
-import urllib.request
 import time
 
 
@@ -34,15 +33,19 @@ def log_gpu(tag):
 def main():
     log_gpu("start")
 
-    # 1. Pull the reference image (orchid/orc placeholder). Replace with your orc jpg URL.
-    img = "/kaggle/working/orc.jpg"
-    try:
-        urllib.request.urlretrieve(
-            "https://raw.githubusercontent.com/Tencent-Hunyuan/Hunyuan3D-2.1/main/assets/example_image/T.png",
-            img,
-        )
-    except Exception as e:
-        print("image fetch failed:", e)
+    # Reference image. On Kaggle, upload the file (left panel "+ Add Input" -> Upload,
+    # or add a Dataset) so it lands at /kaggle/input/<name>/3D-wizard.jpeg, then point
+    # IMG here. Also honors an env override or a CLI arg.
+    img = (
+        os.environ.get("TRELLIS_IMG")
+        or (sys.argv[1] if len(sys.argv) > 1 else None)
+        or "/kaggle/input/3d-wizard/3D-wizard.jpeg"
+    )
+    if not os.path.exists(img):
+        print(f"[trellis] FATAL: image not found at {img}", flush=True)
+        print("Upload it via the Kaggle notebook left panel (+ Add Input / Upload), then", flush=True)
+        print("re-run with:  !python trellis-spike.py /kaggle/input/<name>/3D-wizard.jpeg", flush=True)
+        sys.exit(1)
     from PIL import Image
     im = Image.open(img).convert("RGB")
     print("image", im.size, im.mode, flush=True)
@@ -101,7 +104,7 @@ def main():
     image = PImage.open(img).convert("RGB")
     print("[trellis] running pipeline (image->mesh+gs)...", flush=True)
     t0 = time.time()
-    outputs = pipe.run(image, seed=1)  # multi-image: pipe.run(images=[i1,i2,...])
+    outputs = pipe.run(image, seed=1)  # MULTI-ANGLE (single solid): pipe.run(images=[v1,v2,...])
     print("[trellis] pipeline done in", round(time.time() - t0), "s", flush=True)
     print("output keys:", list(outputs.keys()), flush=True)
 
