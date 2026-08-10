@@ -137,7 +137,7 @@ def install():
     # pymeshlab (mesh remesh for paint) + UV unwrap (xatlas) + misc
     _run([sys.executable, "-m", "pip", "install", "-q",
           "pymeshlab", "pygltflib", "opencv-python-headless", "xatlas", "open3d", "onnxruntime",
-          "realesrgan", "basicsr"])
+          "realesrgan", "basicsr", "fast_simplification"])
     # RE-PIN numpy LAST (see above)
     _run([sys.executable, "-m", "pip", "install", "-q", "numpy==1.26.4"])
 
