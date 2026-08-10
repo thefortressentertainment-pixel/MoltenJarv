@@ -356,6 +356,46 @@ def _run_paint(job_id, mesh_path, ref_path, out_path):
             print(f"[paint-host] cwd -> {HUNYUAN_DIR} (repo root)")
         except Exception as exc:  # noqa: BLE001
             print(f"[paint-host] cwd set warn: {exc}")
+        # fast_simplification (pinned) re-implements trimesh.simplify_quadric_decimation so
+        # the first positional arg is a *reduction RATIO* (0..1), but Hunyuan3D's
+        # simplify_mesh_utils.mesh_simplify_trimesh passes an absolute FACE COUNT (40000)
+        # -> fast_simplification._check_args raises "``target_reduction`` must be between 0
+        # and 1". Rewrite that helper on disk to feed fast_simplification a ratio.
+        try:
+            _smu = os.path.join(HUNYUAN_DIR, "hy3dpaint", "utils", "simplify_mesh_utils.py")
+            if os.path.isfile(_smu):
+                _src_code = open(_smu).read()
+                if "target_reduction" not in _src_code:
+                    import re as _re
+                    _patched = _src_code
+                    _patched = _patched.replace(
+                        "import pymeshlab",
+                        "import pymeshlab\nimport fast_simplification",
+                    )
+                    _patched = _patched.replace(
+                        "        courent = trimesh.load(outputpath.replace(\".glb\", \".obj\"), force=\"mesh\")\n"
+                        "    face_num = courent.faces.shape[0]\n"
+                        "\n"
+                        "    if face_num > target_count:\n"
+                        "        courent = courent.simplify_quadric_decimation(target_count)\n",
+                        "        courent = trimesh.load(outputpath.replace(\".glb\", \".obj\"), force=\"mesh\")\n"
+                        "    face_num = courent.faces.shape[0]\n"
+                        "\n"
+                        "    if face_num > target_count:\n"
+                        "        # fast_simplification uses a reduction RATIO (0..1), not a\n"
+                        "        # face count. target_reduction = fraction of faces to REMOVE.\n"
+                        "        target_reduction = 1.0 - (float(target_count) / float(face_num))\n"
+                        "        _pts = courent.vertices.astype('float64')\n"
+                        "        _fcs = courent.faces\n"
+                        "        pts_o, fcs_o = fast_simplification.simplify(_pts, _fcs, target_reduction)\n"
+                        "        courent = trimesh.Trimesh(vertices=pts_o, faces=fcs_o, process=False)\n",
+                    )
+                    open(_smu, "w").write(_patched)
+                    print("[paint-host] patched simplify_mesh_utils.py for fast_simplification ratio API")
+            else:
+                print("[paint-host] WARN simplify_mesh_utils.py not found at", _smu)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[paint-host] simplify_mesh_utils patch error: {exc}")
         from textureGenPipeline import Hunyuan3DPaintConfig, Hunyuan3DPaintPipeline
         _JOBS[job_id]["status"] = "running"
         config = Hunyuan3DPaintConfig(max_num_view=MAX_NUM_VIEW, resolution=RESOLUTION)
