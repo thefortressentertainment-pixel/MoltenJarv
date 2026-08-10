@@ -9,9 +9,10 @@ print('[kaggle-cell] fetched', len(code), 'chars')
 # HARD CHECK: must be the fixed build (shim present AND build_ext --inplace).
 ok1 = 'creating a shim' in code or 'python3-config shim' in code
 ok2 = 'build_ext --inplace' in code
-print('[kaggle-cell] python3-config-shim:', ok1, '| build_ext --inplace:', ok2)
+ok3 = '_s2.modules["bpy"] = _stub' in code or 'ModuleType("bpy")' in code
+print('[kaggle-cell] shim:', ok1, '| build_ext:', ok2, '| bpy-stub:', ok3)
 if not (ok1 and ok2):
     print('[kaggle-cell] STALE — fetch did not get the fixed build. Restart kernel & Run All to re-fetch.')
 else:
-    print('[kaggle-cell] OK: fixed notebook. Executing...')
+    print('[kaggle-cell] OK: fixed notebook (bpy stub present:', ok3, '). Executing...')
     exec(compile(code, 'kaggle_notebook.py', 'exec'), {})
