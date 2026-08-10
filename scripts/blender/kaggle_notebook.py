@@ -47,25 +47,42 @@ _job_counter = [0]
 def install():
     global HUNYUAN_DIR
     print("[paint-host] installing Hunyuan3D-2.1 (clone + deps + compile)...")
+    print("[paint-host] NOTE: this can take ~5-15 min on first run; the tunnel URL prints AFTER install.")
     if not os.path.isdir("Hunyuan3D-2.1"):
-        subprocess.run(["git", "clone", HUNYUAN_GIT, "Hunyuan3D-2.1"], check=True)
+        try:
+            subprocess.run(["git", "clone", "--depth", "1", HUNYUAN_GIT, "Hunyuan3D-2.1"], check=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[paint-host] WARN: git clone failed: {exc}")
+            print("[paint-host] continuing anyway — the paint stage needs the checkout; if this errors the tunnel still starts.")
     HUNYUAN_DIR = os.path.join(os.getcwd(), "Hunyuan3D-2.1")
+    if not os.path.isdir(HUNYUAN_DIR):
+        print("[paint-host] WARN: Hunyuan3D-2.1 dir missing; paint will fail but tunnel still starts.")
+        return
     os.chdir(HUNYUAN_DIR)
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q",
-                    "torch==2.5.1", "torchvision==0.20.1", "torchaudio==2.5.1",
-                    "--index-url", "https://download.pytorch.org/whl/cu124"], check=False)
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", "requirements.txt"], check=False)
-    subprocess.run(["bash", "compile_mesh_painter.sh"],
-                   cwd=os.path.join(HUNYUAN_DIR, "hy3dpaint", "DifferentiableRenderer"), check=False)
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-e", "."],
-                   cwd=os.path.join(HUNYUAN_DIR, "hy3dpaint", "custom_rasterizer"), check=False)
-    ckpt = os.path.join(HUNYUAN_DIR, "hy3dpaint", "ckpt", "RealESRGAN_x4plus.pth")
-    os.makedirs(os.path.dirname(ckpt), exist_ok=True)
+    def _run(args, **kw):
+        try:
+            subprocess.run(args, check=False, **kw)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[paint-host] WARN: step failed ({exc}) — continuing")
+    _run([sys.executable, "-m", "pip", "install", "-q",
+          "torch==2.5.1", "torchvision==0.20.1", "torchaudio==2.5.1",
+          "--index-url", "https://download.pytorch.org/whl/cu124"])
+    _run([sys.executable, "-m", "pip", "install", "-q", "-r", "requirements.txt"])
+    _run(["bash", "compile_mesh_painter.sh"],
+         cwd=os.path.join(HUNYUAN_DIR, "hy3dpaint", "DifferentiableRenderer"))
+    _run([sys.executable, "-m", "pip", "install", "-q", "-e", "."],
+         cwd=os.path.join(HUNYUAN_DIR, "hy3dpaint", "custom_rasterizer"))
+    ckpt_dir = os.path.join(HUNYUAN_DIR, "hy3dpaint", "ckpt")
+    os.makedirs(ckpt_dir, exist_ok=True)
+    ckpt = os.path.join(ckpt_dir, "RealESRGAN_x4plus.pth")
     if not os.path.exists(ckpt):
-        subprocess.run(["wget", "-q",
-                        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
-                        "-O", ckpt], check=False)
-    print("[paint-host] install done. Weights download on first paint run.")
+        try:
+            subprocess.run(["wget", "-q",
+                            "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
+                            "-O", ckpt], check=False)
+        except Exception:  # noqa: BLE001
+            pass
+    print("[paint-host] install finished.")
 
 
 # ------------------------- paint execution ------------------------------------
@@ -202,36 +219,53 @@ def _ensure_cloudflared():
         return None
 
 
-def start(tunnel=True):
-    def _serve():
-        ThreadingHTTPServer((HOST, PORT), _H).serve_forever()
-    threading.Thread(target=_serve, daemon=True).start()
-    print(f"[paint-host] listening :{PORT} (token {AUTH_TOKEN})")
-    if not tunnel:
-        return
+# ------------------------- run -----------------------------------------------
+# Start the HTTP server first, then open the tunnel and print the URL IMMEDIATELY
+# (so you can copy it while Hunyuan3D-2.1 installs in the background). The paint
+# stage becomes ready once install() completes and the first job runs.
+print(">> Starting paint HTTP server + free tunnel (you'll get the URL in ~seconds)...")
+server_thread = threading.Thread(
+    target=lambda: ThreadingHTTPServer((HOST, PORT), _H).serve_forever(),
+    daemon=True,
+)
+server_thread.start()
+print(f"[paint-host] HTTP server listening on :{PORT} (token {AUTH_TOKEN})")
+
+def _open_tunnel():
     exe = _ensure_cloudflared()
     if not exe:
+        print("[tunnel] !! cloudflared missing — no tunnel. Install it or expose :8000 manually.")
         return
-    print("[tunnel] opening trycloudflare tunnel to :8000...")
+    print("[tunnel] opening a free trycloudflare tunnel to :8000 ... (up to ~90s)")
     proc = subprocess.Popen([exe, "tunnel", "--url", f"http://localhost:{PORT}"],
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    import time as _t
+    deadline = _t.time() + 90
     for line in proc.stdout:
         m = re.search(r"https://[a-z0-9-]+\.trycloudflare\.com", line)
         if m:
-            print("\n" + "=" * 60)
-            print("COPY THIS URL INTO THE M1 TERMINAL (once):")
+            print("\n" + "=" * 64)
+            print("KAGGLE IS LIVE. COPY THIS URL INTO THE M1 TERMINAL (once):")
             print("  jarv-genie key set BLENDER_PAINT_URL " + m.group(0))
             print("  jarv-genie key set BLENDER_PAINT_TOKEN " + AUTH_TOKEN)
             print("then run:  node scripts/blender/craft-one.mjs <img>.jpg --paint-remote")
-            print("=" * 60 + "\n")
+            print("(the paint model is still installing — paste the URL now, craft after install done)")
+            print("=" * 64 + "\n")
+            break
+        if _t.time() > deadline:
+            print("[tunnel] WARN: no URL in 90s — check Internet egress / port 8000. Exposing :8000 you set it manually.")
+            break
     try:
         proc.wait()
     except KeyboardInterrupt:
         proc.terminate()
+    while True:
+        _t.sleep(3600)
 
+# Tunnel opens in the background and prints the URL fast; install runs in foreground.
+tunnel_thread = threading.Thread(target=_open_tunnel, daemon=True)
+tunnel_thread.start()
 
-# ------------------------- run -----------------------------------------------
-print(">> STEP 1/2: installing Hunyuan3D-2.1 (first run takes a few minutes)...")
+print(">> STEP: installing Hunyuan3D-2.1 (continues in background — paste the URL when you see it)...")
 install()
-print(">> STEP 2/2: starting paint host + free tunnel...")
-start(tunnel=True)
+print("[paint-host] install done. Server + tunnel are up; send jobs from the M1 now.")
