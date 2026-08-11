@@ -134,11 +134,19 @@ def main():
     # diffoctreerast/diff-gaussian for the renderers). Prebuilt wheels are far more
     # reliable than building submodule setup.py from source on Kaggle. kaolin comes
     # from NVIDIA's index for this exact torch (2.4.0) + cu121 build.
+    # CUDA render extensions. nvdiffrast is NOT on PyPI — TRELLIS installs it from
+    # GitHub (see setup.sh). diffoctreerast ships in the TRELLIS submodule checkout;
+    # pip-install it from that local path.
     r = sh(
-        _pip + " nvdiffrast diffoctreerast",
+        f"{sys.executable} -m pip install -q --target {trellis_libs} git+https://github.com/NVlabs/nvdiffrast.git",
         timeout=1800,
     )
-    print("pip render deps rc", r.returncode, r.stderr[-600:], flush=True)
+    print("pip nvdiffrast rc", r.returncode, r.stderr[-600:], flush=True)
+    r = sh(
+        f"{sys.executable} -m pip install -q --target {trellis_libs} /kaggle/working/TRELLIS/submodules/diffoctreerast",
+        timeout=1800,
+    )
+    print("pip diffoctreerast rc", r.returncode, r.stderr[-600:], flush=True)
     r = sh(
         f"{sys.executable} -m pip install -q --target {trellis_libs} "
         + "kaolin -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.4.0_cu121.html",
