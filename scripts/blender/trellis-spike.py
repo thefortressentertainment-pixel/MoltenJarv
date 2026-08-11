@@ -130,13 +130,31 @@ def main():
     )
     print("TORCH CHECK:\n" + r.stdout + r.stderr[-600:], flush=True)
 
-    # build the local submodules that have wheels / are light; catch failures non-fatally
-    for sub in ["diffoctreerast", "spconv", "kaolin", "nvdiffrast", "mipgaussian"]:
-        setup = f"/kaggle/working/TRELLIS/submodules/{sub}/setup.py"
-        if os.path.exists(setup):
-            print(f"[trellis] building submodule {sub}...", flush=True)
-            r = sh(f"{sys.executable} setup.py build_ext --inplace", cwd=os.path.dirname(setup), timeout=1500)
-            print(f"[trellis] {sub} rc={r.returncode} {r.stderr[-500:]}", flush=True)
+    # CUDA extensions TRELLIS needs at import (kaolin for FlexiCubes mesh, nvdiffrast/
+    # diffoctreerast/diff-gaussian for the renderers). Prebuilt wheels are far more
+    # reliable than building submodule setup.py from source on Kaggle. kaolin comes
+    # from NVIDIA's index for this exact torch (2.4.0) + cu121 build.
+    r = sh(
+        _pip + " nvdiffrast diffoctreerast",
+        timeout=1800,
+    )
+    print("pip render deps rc", r.returncode, r.stderr[-600:], flush=True)
+    r = sh(
+        f"{sys.executable} -m pip install -q --target {trellis_libs} "
+        + "kaolin -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.4.0_cu121.html",
+        timeout=1800,
+    )
+    print("pip kaolin rc", r.returncode, r.stderr[-600:], flush=True)
+    if not os.path.isdir("/kaggle/working/diff-gaussian-rasterization"):
+        sh(
+            "git clone --recursive https://github.com/graphdeco-inria/diff-gaussian-rasterization.git /kaggle/working/diff-gaussian-rasterization",
+            timeout=600,
+        )
+    r = sh(
+        f"{sys.executable} -m pip install -q --target {trellis_libs} /kaggle/working/diff-gaussian-rasterization",
+        timeout=1800,
+    )
+    print("pip diff-gaussian rc", r.returncode, r.stderr[-600:], flush=True)
 
     # 4. Run image->3D and export a textured GLB.
     # Our self-contained matched torch/torchvision live in trellis_libs; make sure
