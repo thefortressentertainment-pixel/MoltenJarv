@@ -330,10 +330,12 @@ def main():
                 _noise = _t0.randn(num_samples, _flow.in_channels, _reso, _reso, _reso).to(self.device)
                 _sp = {**self.sparse_structure_sampler_params, **sampler_params}
                 _zs = self.sparse_structure_sampler.sample(_flow, _noise, **cond, **_sp, verbose=False).samples
+                _zsmin = float(_zs.min()); _zsmax = float(_zs.max()); _zsmean = float(_zs.mean())
                 _dec = self.models["sparse_structure_decoder"](_zs)
                 _zmin = float(_dec.min()); _zmax = float(_dec.max())
                 _zfrac = float((_dec > 0).float().mean())
-            print(f"[trellis] SS OCCUPANCY DIAG: coords={_n} cond[mean={_cmean:.4f} absmax={_cabs:.4f} std={_cstd:.4f}] z_s[min={_zmin:.4f} max={_zmax:.4f}] frac>0={_zfrac:.5f}", flush=True)
+            print(f"[trellis] SS OCCUPANCY DIAG: coords={_n} cond[mean={_cmean:.4f} absmax={_cabs:.4f} std={_cstd:.4f}] "
+                  f"z(raw)[mean={_zsmean:.4f} min={_zsmin:.4f} max={_zsmax:.4f}] dec[min={_zmin:.4f} max={_zmax:.4f}] frac>0={_zfrac:.5f}", flush=True)
         except Exception as _d:
             print(f"[trellis] SS OCCUPANCY DIAG ERROR: {_d}", flush=True)
         return coords
