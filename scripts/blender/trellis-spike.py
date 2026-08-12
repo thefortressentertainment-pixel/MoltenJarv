@@ -203,7 +203,6 @@ def main():
     # into $TORCH_HOME/hub and pre-fetch the weight so the load is fully local.
     import torch as _t, torch.hub as _hub
     _hub_dir = _t.hub.get_dir()  # $TORCH_HOME/hub, usually ~/.cache/torch/hub
-    _hub.check_dir()
     _hub.set_dir(_hub_dir)
     _repo_cache = os.path.join(_hub_dir, "facebookresearch_dinov2_main")
     _dinov2_repo = os.path.join(_hub_dir, "facebookresearch_dinov2")
