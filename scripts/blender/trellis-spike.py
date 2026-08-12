@@ -37,6 +37,11 @@ def log_gpu(tag):
 
 def main():
     global trellis_libs
+    # DINOv2's attention uses xformers ONLY when XFORMERS_DISABLED is unset; here
+    # xformers mem-eff can't run the float32 encoder (T4 cap 7.5 + fp32 unsupported),
+    # so force DINOv2's native torch attention. TRELLIS's own sparse attention reads
+    # ATTN_BACKEND (not XFORMERS_DISABLED), so this does NOT affect TRELLIS.
+    os.environ.setdefault("XFORMERS_DISABLED", "1")
     trellis_libs = "/kaggle/working/trellis_libs"
     log_gpu("start")
     print(f"[trellis] interpreter: {sys.version.split()[0]} at {sys.executable}", flush=True)
@@ -112,9 +117,26 @@ def main():
     r = sh(
         _pip + " pillow imageio imageio-ffmpeg tqdm easydict opencv-python-headless scipy ninja"
         + " rembg onnxruntime trimesh open3d xatlas pyvista pymeshfix igraph transformers"
-        + " einops matplotlib ipywidgets plyfile 'xformers==0.0.27'",
+        + " einops matplotlib ipywidgets plyfile",
         timeout=2400,
     )
+    print("pip deps rc", r.returncode, r.stderr[-600:], flush=True)
+    # xformers: the box's build is for torch 2.3.1 and has NO CUDA support (the DINOv2
+    # mem-eff forward failed with "xFormers wasn't build with CUDA support"). Force the
+    # torch-2.4.0/cu121/cp312 CUDA wheel (0.0.27.post2) into trellis_libs so it shadows
+    # the broken /usr/local one. NOTE: xformers mem-eff still won't run float32/DINOv2,
+    # so DINOv2 also gets XFORMERS_DISABLED (below) to use native attention; this wheel
+    # is for TRELLIS's half-cast sparse attention.
+    r = sh(
+        f"{sys.executable} -m pip install -q --force-reinstall --target {trellis_libs} 'xformers==0.0.27.post2'",
+        timeout=1800,
+    )
+    print("pip xformers rc", r.returncode, r.stderr[-600:], flush=True)
+    r = sh(
+        f"PYTHONPATH={trellis_libs} python -W ignore -c "
+        "'import xformers, torch; print(\"xformers\", xformers.__version__, \"cuda\", torch.cuda.is_available(), (torch.cuda.is_available() and (xformers._is_triton_available or True)))'",
+    )
+    print(r.stdout, r.stderr[-400:], flush=True)
     print("pip deps rc", r.returncode, r.stderr[-800:], flush=True)
     r = sh(
         f"{sys.executable} -m pip install -q --target {trellis_libs}"
