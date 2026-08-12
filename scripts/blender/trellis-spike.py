@@ -320,7 +320,11 @@ def main():
             import torch as _t0
             _n = int(coords.shape[0]) if coords is not None else -1
             _zmin = _zmax = _zfrac = float("nan")
+            _cmean = _cabs = _cstd = float("nan")
             with _t0.no_grad():
+                _c = cond.get("cond")
+                if _c is not None:
+                    _cmean = float(_c.mean()); _cabs = float(_c.abs().max()); _cstd = float(_c.std())
                 _flow = self.models["sparse_structure_flow_model"]
                 _reso = _flow.resolution
                 _noise = _t0.randn(num_samples, _flow.in_channels, _reso, _reso, _reso).to(self.device)
@@ -329,7 +333,7 @@ def main():
                 _dec = self.models["sparse_structure_decoder"](_zs)
                 _zmin = float(_dec.min()); _zmax = float(_dec.max())
                 _zfrac = float((_dec > 0).float().mean())
-            print(f"[trellis] SS OCCUPANCY DIAG: coords={_n} z_s[min={_zmin:.4f} max={_zmax:.4f}] frac>0={_zfrac:.5f}", flush=True)
+            print(f"[trellis] SS OCCUPANCY DIAG: coords={_n} cond[mean={_cmean:.4f} absmax={_cabs:.4f} std={_cstd:.4f}] z_s[min={_zmin:.4f} max={_zmax:.4f}] frac>0={_zfrac:.5f}", flush=True)
         except Exception as _d:
             print(f"[trellis] SS OCCUPANCY DIAG ERROR: {_d}", flush=True)
         return coords
