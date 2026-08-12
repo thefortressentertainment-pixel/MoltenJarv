@@ -197,43 +197,33 @@ def main():
     from PIL import Image as PImage
 
     print("[trellis] loading TRELLIS-image-large (1.2B)...", flush=True)
-    # TRELLIS _init_image_cond_model does torch.hub.load('facebookresearch/dinov2',
-    # 'dinov2_vitl14'). torch.hub clones the repo from GitHub at runtime, which is
-    # flaky on Kaggle (RemoteDisconnected). Pre-warm the torch hub cache: clone dinov2
-    # into $TORCH_HOME/hub and pre-fetch the weight so the load is fully local.
-    import torch as _t, torch.hub as _hub
-    _hub_dir = _t.hub.get_dir()  # $TORCH_HOME/hub, usually ~/.cache/torch/hub
-    _hub.set_dir(_hub_dir)
-    # torch.hub caches a repo as <owner>_<repo>_<ref>. The ref default in the cached
-    # dir-name varies between torch versions ('main' vs 'master'). To be safe, clone
-    # once and expose it under BOTH names via symlinks so whichever torch.hub expects
-    # is already warm (and it never touches GitHub at load time).
+    import torch as _t
+    _hub_dir = _t.hub.get_dir()
+    # KEY INSIGHT: TRELLIS loads DINOv2 via torch.hub.load('facebookresearch/dinov2').
+    # torch 2.4's _get_cache_or_reload -> _parse_repo_info pings github.com BEFORE any
+    # local-cache check, so a warm hub cache CANNOT stop RemoteDisconnected. The only
+    # reliable fix is to bypass torch.hub: load DINOv2 as a local package + weight and
+    # monkeypatch TRELLIS._init_image_cond_model.
+    # Clone DINOv2 once (for the local package source), then pip-install it.
     _repo_base = os.path.join(_hub_dir, "facebookresearch_dinov2")
     if not os.path.isdir(_repo_base):
         for attempt in range(3):
-            rc_ = sh(
-                "git clone --depth 1 https://github.com/facebookresearch/dinov2.git " + _repo_base
-            )
+            rc_ = sh("git clone --depth 1 https://github.com/facebookresearch/dinov2.git " + _repo_base)
             if rc_.returncode == 0:
                 break
-        else:
-            print("[trellis] WARN: could not clone dinov2; will let torch.hub retry", flush=True)
-    for _suffix in ("master", "main"):
-        _link = os.path.join(_hub_dir, f"facebookresearch_dinov2_{_suffix}")
-        if os.path.isdir(_repo_base) and not os.path.exists(_link):
-            try:
-                os.symlink(_repo_base, _link)
-            except OSError:
-                pass
-    _repo_cache = _repo_base
-    # Pre-download the vitl14 weight into torch's checkpoints cache (same filename the
-    # hub load uses) with retries — dl.fbaipublicfiles.com is more reliable than github.
+    # Install dinov2 as a LOCAL package so we never go through torch.hub at all.
+    r = sh(
+        f"{sys.executable} -m pip install -q --no-build-isolation --target {trellis_libs} {_repo_base}",
+        timeout=900,
+    )
+    print("pip dinov2 rc", r.returncode, r.stderr[-400:], flush=True)
+    # Pre-download the vitl14 weight (dl.fbaipublicfiles is reliable on Kaggle).
     _ckpt_fn = "dinov2_vitl14_pretrain.pth"
-    _ckpt = os.path.join(_hub.get_dir(), "checkpoints")  # torch.hub caches weights here
-    os.makedirs(_ckpt, exist_ok=True)
-    _ckpt_path = os.path.join(_ckpt, _ckpt_fn)
+    _ckpt_dir = "/kaggle/working/dinov2_ckpt"
+    os.makedirs(_ckpt_dir, exist_ok=True)
+    _ckpt_path = os.path.join(_ckpt_dir, _ckpt_fn)
     _url = "https://dl.fbaipublicfiles.com/dinov2/dinov2_vitl14/" + _ckpt_fn
-    if not os.path.exists(_ckpt_path) or os.path.getsize(_ckpt_path) < 1_000_000:
+    if (not os.path.exists(_ckpt_path)) or os.path.getsize(_ckpt_path) < 1_000_000:
         print(f"[trellis] pre-downloading DINOv2 vitl14 weight ({_url})...", flush=True)
         import urllib.request as _ur
         for attempt in range(3):
@@ -243,7 +233,33 @@ def main():
                 break
             except Exception as _de:
                 print(f"[trellis] dinov2 dl attempt {attempt} failed: {_de}", flush=True)
-    print(f"[trellis] torch hub cache pre-warmed (dinov2 clone={os.path.isdir(_repo_cache)}, ckpt={os.path.exists(_ckpt_path)})", flush=True)
+    print(f"[trellis] dinov2 ready (pkg import ok + ckpt={os.path.exists(_ckpt_path)})", flush=True)
+    # KEY FIX: torch.hub.load('facebookresearch/dinov2', ...) pings github.com in
+    # _parse_repo_info BEFORE any local-cache check, so a warm cache CANNOT stop the
+    # RemoteDisconnected. The only reliable path is to bypass torch.hub entirely:
+    # monkeypatch TRELLIS._init_image_cond_model to load dinov2 locally.
+    from trellis.pipelines import TrellisImageTo3DPipeline as _TIP
+    def _local_dinov2_init(self, name):
+        try:
+            from dinov2.hub.backbones import dinov2_vitl14
+            _m = dinov2_vitl14(pretrained=False)
+            _sd = torch.load(_ckpt_path, map_location="cpu", weights_only=True)
+            if not isinstance(_sd, dict) or "state_dict" in _sd:
+                _sd = _sd.get("state_dict", _sd)
+            _m.load_state_dict(_sd, strict=False)
+            _m.eval()
+        except Exception as _le:
+            print(f"[trellis] local dinov2 load FAILED ({_le}); falling back to torch.hub", flush=True)
+            import torch.hub as _hub2
+            _m = _hub2.load("facebookresearch/dinov2", name, pretrained=True)
+            _m.eval()
+        self.models["image_cond_model"] = _m
+        import torchvision.transforms as _tf
+        self.image_cond_model_transform = _tf.Compose([
+            _tf.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+    _TIP._init_image_cond_model = _local_dinov2_init
+    print("[trellis] patched _init_image_cond_model to load DINOv2 locally (no torch.hub/github)", flush=True)
 
     t0 = time.time()
     pipe = TrellisImageTo3DPipeline.from_pretrained("microsoft/TRELLIS-image-large")
