@@ -156,13 +156,13 @@ def main():
     # diffoctreerast/diff-gaussian for the renderers). Prebuilt wheels are far more
     # reliable than building submodule setup.py from source on Kaggle. kaolin comes
     # from NVIDIA's index for this exact torch (2.4.0) + cu121 build.
-    # spconv is REQUIRED by the sparse-structure models ("Backend: spconv"). The
-    # cu120-suffixed wheels stop at py3.11 (no cp312), so use the plain `spconv`
-    # metapackage which ships a cp312 manylinux wheel (2.3.8) and pulls the matching
-    # spconv-cuXXX. If its .so was built for a different CUDA than torch cu121, we'll
-    # see a c10/cudart ABI error and must fall back to a spconv built for cu121.
+    # spconv is REQUIRED by the sparse-structure models ("Backend: spconv"). The plain
+    # `spconv` wheel is a CPU-ONLY build (the self-test failed: "not implemented for CPU
+    # ONLY build"), so the CUDA sparse decoder produced no occupancy -> empty coords.
+    # Install the CUDA build spconv-cu121 (2.3.8 has a cp312 wheel) which matches torch
+    # 2.4.0/cu121. Force-reinstall to supersede the CPU-only SPOOL one.
     r = sh(
-        f"{sys.executable} -m pip install -q --target {trellis_libs} spconv==2.3.8",
+        f"{sys.executable} -m pip install -q --force-reinstall --target {trellis_libs} spconv-cu121==2.3.8",
         timeout=1800,
     )
     print("pip spconv rc", r.returncode, r.stderr[-600:], flush=True)
