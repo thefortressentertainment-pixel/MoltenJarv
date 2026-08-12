@@ -229,7 +229,7 @@ def main():
     # Pre-download the vitl14 weight into torch's checkpoints cache (same filename the
     # hub load uses) with retries — dl.fbaipublicfiles.com is more reliable than github.
     _ckpt_fn = "dinov2_vitl14_pretrain.pth"
-    _ckpt = os.path.join(_hub.checkpoint_dir)   # $TORCH_HOME/checkpoints
+    _ckpt = os.path.join(_hub.get_dir(), "checkpoints")  # torch.hub caches weights here
     os.makedirs(_ckpt, exist_ok=True)
     _ckpt_path = os.path.join(_ckpt, _ckpt_fn)
     _url = "https://dl.fbaipublicfiles.com/dinov2/dinov2_vitl14/" + _ckpt_fn
