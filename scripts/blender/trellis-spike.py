@@ -265,6 +265,28 @@ def main():
     print("[trellis] model loaded in", round(time.time() - t0), "s", flush=True)
     log_gpu("after-load")
 
+    # rembg (input background removal) downloads its u2net.onnx from github on first
+    # use -> same RemoteDisconnected as DINOv2. Pre-download it to rembg's expected
+    # path (~/.u2net/u2net.onnx) with several mirror sources + retries.
+    _u2net = os.path.join(os.path.expanduser("~"), ".u2net", "u2net.onnx")
+    if (not os.path.exists(_u2net)) or os.path.getsize(_u2net) < 40_000_000:
+        os.makedirs(os.path.dirname(_u2net), exist_ok=True)
+        _urls = [
+            "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx",
+            "https://huggingface.co/ruffneek/rembg/resolve/main/u2net.onnx",
+            "https://dl.fbaipublicfiles.com/deeplabv3/u2net.onnx",
+        ]
+        import urllib.request as _ur
+        for _url in _urls:
+            try:
+                print(f"[trellis] pre-downloading u2net.onnx ({_url})...", flush=True)
+                _ur.urlretrieve(_url, _u2net + ".part")
+                os.replace(_u2net + ".part", _u2net)
+                break
+            except Exception as _ue:
+                print(f"[trellis] u2net dl failed ({_url}): {_ue}", flush=True)
+    print(f"[trellis] u2net.onnx ready ({os.path.exists(_u2net)})", flush=True)
+
     image = PImage.open(img).convert("RGB")
     print("[trellis] running pipeline (image->mesh+gs)...", flush=True)
     t0 = time.time()
