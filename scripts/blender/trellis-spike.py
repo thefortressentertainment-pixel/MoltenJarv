@@ -266,8 +266,10 @@ def main():
     # scaled_dot_product_attention (T4-capable). Force it so the SS-flow/slat sampling
     # doesn't hit the xformers NotImplementedError.
     try:
+        import torch.nn.functional as _tnnf
         import trellis.modules.attention.full_attn as _dense_attn
         _dense_attn.BACKEND = "sdpa"
+        _dense_attn.sdpa = _tnnf.scaled_dot_product_attention  # sdpa is imported at module-load only for BACKEND=='sdpa'; bind it now
         print("[trellis] dense attention BACKEND -> sdpa (native torch SDPA)", flush=True)
     except Exception as _dae:
         print(f"[trellis] WARN dense-attn patch failed: {_dae}", flush=True)
