@@ -240,19 +240,16 @@ def main():
     # monkeypatch TRELLIS._init_image_cond_model to load dinov2 locally.
     from trellis.pipelines import TrellisImageTo3DPipeline as _TIP
     def _local_dinov2_init(self, name):
-        try:
-            from dinov2.hub.backbones import dinov2_vitl14
-            _m = dinov2_vitl14(pretrained=False)
-            _sd = torch.load(_ckpt_path, map_location="cpu", weights_only=True)
-            if not isinstance(_sd, dict) or "state_dict" in _sd:
-                _sd = _sd.get("state_dict", _sd)
-            _m.load_state_dict(_sd, strict=False)
-            _m.eval()
-        except Exception as _le:
-            print(f"[trellis] local dinov2 load FAILED ({_le}); falling back to torch.hub", flush=True)
-            import torch.hub as _hub2
-            _m = _hub2.load("facebookresearch/dinov2", name, pretrained=True)
-            _m.eval()
+        # NO torch.hub fallback: it pings github and would just RemoteDisconnect.
+        # Fail loudly so a local DINOv2 problem is caught immediately, not after a
+        # 15-min silent detour.
+        from dinov2.hub.backbones import dinov2_vitl14
+        _m = dinov2_vitl14(pretrained=False)
+        _sd = torch.load(_ckpt_path, map_location="cpu", weights_only=True)
+        if isinstance(_sd, dict):
+            _sd = _sd.get("state_dict", _sd)
+        _m.load_state_dict(_sd, strict=False)
+        _m.eval()
         self.models["image_cond_model"] = _m
         import torchvision.transforms as _tf
         self.image_cond_model_transform = _tf.Compose([
