@@ -213,7 +213,7 @@ def main():
                 break
     # Install dinov2 as a LOCAL package so we never go through torch.hub at all.
     r = sh(
-        f"{sys.executable} -m pip install -q --no-build-isolation --target {trellis_libs} {_repo_base}",
+        f"{sys.executable} -m pip install -q --no-deps --no-build-isolation --target {trellis_libs} {_repo_base}",
         timeout=900,
     )
     print("pip dinov2 rc", r.returncode, r.stderr[-400:], flush=True)
