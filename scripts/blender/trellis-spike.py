@@ -243,9 +243,10 @@ def main():
         # NO torch.hub fallback: it pings github and would just RemoteDisconnect.
         # Fail loudly so a local DINOv2 problem is caught immediately, not after a
         # 15-min silent detour.
+        import torch as _torch
         from dinov2.hub.backbones import dinov2_vitl14
         _m = dinov2_vitl14(pretrained=False)
-        _sd = torch.load(_ckpt_path, map_location="cpu", weights_only=True)
+        _sd = _torch.load(_ckpt_path, map_location="cpu", weights_only=True)
         if isinstance(_sd, dict):
             _sd = _sd.get("state_dict", _sd)
         _m.load_state_dict(_sd, strict=False)
