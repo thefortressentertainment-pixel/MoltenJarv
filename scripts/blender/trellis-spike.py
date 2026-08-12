@@ -197,6 +197,45 @@ def main():
     from PIL import Image as PImage
 
     print("[trellis] loading TRELLIS-image-large (1.2B)...", flush=True)
+    # TRELLIS _init_image_cond_model does torch.hub.load('facebookresearch/dinov2',
+    # 'dinov2_vitl14'). torch.hub clones the repo from GitHub at runtime, which is
+    # flaky on Kaggle (RemoteDisconnected). Pre-warm the torch hub cache: clone dinov2
+    # into $TORCH_HOME/hub and pre-fetch the weight so the load is fully local.
+    import torch as _t, torch.hub as _hub
+    _hub_dir = _t.hub.get_dir()  # $TORCH_HOME/hub, usually ~/.cache/torch/hub
+    _hub.check_dir()
+    _hub.set_dir(_hub_dir)
+    _repo_cache = os.path.join(_hub_dir, "facebookresearch_dinov2_main")
+    _dinov2_repo = os.path.join(_hub_dir, "facebookresearch_dinov2")
+    if not os.path.isdir(_repo_cache):
+        os.makedirs(_repo_cache, exist_ok=True)
+        for attempt in range(3):
+            rc_ = sh(
+                "git clone --depth 1 https://github.com/facebookresearch/dinov2.git " + _repo_cache
+            )
+            if rc_.returncode == 0:
+                break
+        else:
+            print("[trellis] WARN: could not clone dinov2 to hub cache; will let torch.hub retry", flush=True)
+    # Pre-download the vitl14 weight into torch's checkpoints cache (same filename the
+    # hub load uses) with retries — dl.fbaipublicfiles.com is more reliable than github.
+    _ckpt_fn = "dinov2_vitl14_pretrain.pth"
+    _ckpt = os.path.join(_hub.checkpoint_dir)   # $TORCH_HOME/checkpoints
+    os.makedirs(_ckpt, exist_ok=True)
+    _ckpt_path = os.path.join(_ckpt, _ckpt_fn)
+    _url = "https://dl.fbaipublicfiles.com/dinov2/dinov2_vitl14/" + _ckpt_fn
+    if not os.path.exists(_ckpt_path) or os.path.getsize(_ckpt_path) < 1_000_000:
+        print(f"[trellis] pre-downloading DINOv2 vitl14 weight ({_url})...", flush=True)
+        import urllib.request as _ur
+        for attempt in range(3):
+            try:
+                _ur.urlretrieve(_url, _ckpt_path + ".part")
+                os.replace(_ckpt_path + ".part", _ckpt_path)
+                break
+            except Exception as _de:
+                print(f"[trellis] dinov2 dl attempt {attempt} failed: {_de}", flush=True)
+    print(f"[trellis] torch hub cache pre-warmed (dinov2 clone={os.path.isdir(_repo_cache)}, ckpt={os.path.exists(_ckpt_path)})", flush=True)
+
     t0 = time.time()
     pipe = TrellisImageTo3DPipeline.from_pretrained("microsoft/TRELLIS-image-large")
     pipe.cuda()
