@@ -204,18 +204,28 @@ def main():
     import torch as _t, torch.hub as _hub
     _hub_dir = _t.hub.get_dir()  # $TORCH_HOME/hub, usually ~/.cache/torch/hub
     _hub.set_dir(_hub_dir)
-    _repo_cache = os.path.join(_hub_dir, "facebookresearch_dinov2_main")
-    _dinov2_repo = os.path.join(_hub_dir, "facebookresearch_dinov2")
-    if not os.path.isdir(_repo_cache):
-        os.makedirs(_repo_cache, exist_ok=True)
+    # torch.hub caches a repo as <owner>_<repo>_<ref>. The ref default in the cached
+    # dir-name varies between torch versions ('main' vs 'master'). To be safe, clone
+    # once and expose it under BOTH names via symlinks so whichever torch.hub expects
+    # is already warm (and it never touches GitHub at load time).
+    _repo_base = os.path.join(_hub_dir, "facebookresearch_dinov2")
+    if not os.path.isdir(_repo_base):
         for attempt in range(3):
             rc_ = sh(
-                "git clone --depth 1 https://github.com/facebookresearch/dinov2.git " + _repo_cache
+                "git clone --depth 1 https://github.com/facebookresearch/dinov2.git " + _repo_base
             )
             if rc_.returncode == 0:
                 break
         else:
-            print("[trellis] WARN: could not clone dinov2 to hub cache; will let torch.hub retry", flush=True)
+            print("[trellis] WARN: could not clone dinov2; will let torch.hub retry", flush=True)
+    for _suffix in ("master", "main"):
+        _link = os.path.join(_hub_dir, f"facebookresearch_dinov2_{_suffix}")
+        if os.path.isdir(_repo_base) and not os.path.exists(_link):
+            try:
+                os.symlink(_repo_base, _link)
+            except OSError:
+                pass
+    _repo_cache = _repo_base
     # Pre-download the vitl14 weight into torch's checkpoints cache (same filename the
     # hub load uses) with retries — dl.fbaipublicfiles.com is more reliable than github.
     _ckpt_fn = "dinov2_vitl14_pretrain.pth"
