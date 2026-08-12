@@ -311,6 +311,30 @@ def main():
               f"nonzero={int((_sc_vals != 0).sum())} absmax={float(_sc_vals.abs().max())}", flush=True)
     except Exception as _sct:
         print(f"[trellis] SPARSE CONV SELF-TEST FAILED: {_sct}", flush=True)
+    # Pinpoint WHERE occupancy dies when coords comes back empty. Wrap
+    # sample_sparse_structure to log z_s (SS-flow output) stats + coords count.
+    _orig_sss = _TIP.sample_sparse_structure
+    def _wrapped_sss(self, cond, num_samples=1, sampler_params={}):
+        coords = _orig_sss(self, cond, num_samples=num_samples, sampler_params=sampler_params)
+        try:
+            import torch as _t0
+            _n = int(coords.shape[0]) if coords is not None else -1
+            _zmin = _zmax = _zfrac = float("nan")
+            with _t0.no_grad():
+                _flow = self.models["sparse_structure_flow_model"]
+                _reso = _flow.resolution
+                _noise = _t0.randn(num_samples, _flow.in_channels, _reso, _reso, _reso).to(self.device)
+                _sp = {**self.sparse_structure_sampler_params, **sampler_params}
+                _zs = self.sparse_structure_sampler.sample(_flow, _noise, **cond, **_sp, verbose=False).samples
+                _dec = self.models["sparse_structure_decoder"](_zs)
+                _zmin = float(_dec.min()); _zmax = float(_dec.max())
+                _zfrac = float((_dec > 0).float().mean())
+            print(f"[trellis] SS OCCUPANCY DIAG: coords={_n} z_s[min={_zmin:.4f} max={_zmax:.4f}] frac>0={_zfrac:.5f}", flush=True)
+        except Exception as _d:
+            print(f"[trellis] SS OCCUPANCY DIAG ERROR: {_d}", flush=True)
+        return coords
+    _TIP.sample_sparse_structure = _wrapped_sss
+    print("[trellis] instrumented sample_sparse_structure for occupancy diagnostics", flush=True)
     def _local_dinov2_init(self, name):
         # NO torch.hub fallback: it pings github and would just RemoteDisconnect.
         # Fail loudly so a local DINOv2 problem is caught immediately, not after a
