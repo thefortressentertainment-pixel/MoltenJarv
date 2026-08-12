@@ -261,6 +261,16 @@ def main():
     # RemoteDisconnected. The only reliable path is to bypass torch.hub entirely:
     # monkeypatch TRELLIS._init_image_cond_model to load dinov2 locally.
     from trellis.pipelines import TrellisImageTo3DPipeline as _TIP
+    # TRELLIS DENSE attention defaults to xformers which can't run on the T4 (cap 7.5,
+    # fp16). It supports BACKEND == 'sdpa' -> native torch.nn.functional.
+    # scaled_dot_product_attention (T4-capable). Force it so the SS-flow/slat sampling
+    # doesn't hit the xformers NotImplementedError.
+    try:
+        import trellis.modules.attention.full_attn as _dense_attn
+        _dense_attn.BACKEND = "sdpa"
+        print("[trellis] dense attention BACKEND -> sdpa (native torch SDPA)", flush=True)
+    except Exception as _dae:
+        print(f"[trellis] WARN dense-attn patch failed: {_dae}", flush=True)
     def _local_dinov2_init(self, name):
         # NO torch.hub fallback: it pings github and would just RemoteDisconnect.
         # Fail loudly so a local DINOv2 problem is caught immediately, not after a
