@@ -157,17 +157,36 @@ def main():
     # reliable than building submodule setup.py from source on Kaggle. kaolin comes
     # from NVIDIA's index for this exact torch (2.4.0) + cu121 build.
     # spconv is REQUIRED by the sparse-structure models ("Backend: spconv"). The plain
-    # `spconv` wheel is a CPU-ONLY build (the self-test failed: "not implemented for CPU
-    # ONLY build"), so the CUDA sparse decoder produced no occupancy -> empty coords.
-    # Install the CUDA build spconv-cu121 (2.3.8 has a cp312 wheel) which matches torch
-    # 2.4.0/cu121. Force-reinstall to supersede the CPU-only SPOOL one.
+    # `spconv` wheel is a CPU-ONLY build (self-test: "not implemented for CPU ONLY
+    # build"), so the CUDA sparse decoder produced no occupancy -> empty coords. Both
+    # `spconv` and `spconv-cu121` install the same top-level `spconv` package, so a
+    # plain --force-reinstall can leave stale CPU .so files that win on sys.path. Wipe
+    # the package dirs first for a deterministic CUDA install of spconv-cu121 (cu121
+    # == our torch 2.4.0/cu121; has a cp312 wheel).
+    import shutil as _shutil
+    for _pkg in ("spconv", "spconv.pytorch", "spconv-core"):
+        _pd = os.path.join(trellis_libs, _pkg)
+        if os.path.isdir(_pd) or os.path.exists(_pd):
+            try:
+                if os.path.isdir(_pd):
+                    _shutil.rmtree(_pd, ignore_errors=True)
+                else:
+                    os.remove(_pd)
+            except Exception:
+                pass
+    for _name in list(os.listdir(trellis_libs)):
+        if _name.startswith("spconv") and _name.endswith("dist-info"):
+            try:
+                _shutil.rmtree(os.path.join(trellis_libs, _name), ignore_errors=True)
+            except Exception:
+                pass
     r = sh(
-        f"{sys.executable} -m pip install -q --force-reinstall --target {trellis_libs} spconv-cu121==2.3.8",
+        f"{sys.executable} -m pip install -q --target {trellis_libs} 'spconv-cu121==2.3.8'",
         timeout=1800,
     )
     print("pip spconv rc", r.returncode, r.stderr[-600:], flush=True)
     r = sh(
-        f"PYTHONPATH={trellis_libs} python -W ignore -c 'import spconv; print(\"SPCONV_OK\", spconv.__version__)'",
+        f"PYTHONPATH={trellis_libs} python -W ignore -c 'import spconv; print(\"SPCONV_OK\", spconv.__version__, spconv.__file__)'",
     )
     print("spconv check:\n" + r.stdout + r.stderr[-600:], flush=True)
     # CUDA render extensions. nvdiffrast needs --no-build-isolation (its setup.py
