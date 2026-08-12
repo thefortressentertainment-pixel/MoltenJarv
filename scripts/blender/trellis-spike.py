@@ -134,13 +134,20 @@ def main():
     # diffoctreerast/diff-gaussian for the renderers). Prebuilt wheels are far more
     # reliable than building submodule setup.py from source on Kaggle. kaolin comes
     # from NVIDIA's index for this exact torch (2.4.0) + cu121 build.
-    # spconv is REQUIRED by the sparse-structure models ("Backend: spconv"); provide
-    # the cu120 wheel (setup.sh uses spconv-cu120 for CUDA 12.x).
+    # spconv is REQUIRED by the sparse-structure models ("Backend: spconv"). The
+    # cu120-suffixed wheels stop at py3.11 (no cp312), so use the plain `spconv`
+    # metapackage which ships a cp312 manylinux wheel (2.3.8) and pulls the matching
+    # spconv-cuXXX. If its .so was built for a different CUDA than torch cu121, we'll
+    # see a c10/cudart ABI error and must fall back to a spconv built for cu121.
     r = sh(
-        f"{sys.executable} -m pip install -q --target {trellis_libs} spconv-cu120",
+        f"{sys.executable} -m pip install -q --target {trellis_libs} spconv==2.3.8",
         timeout=1800,
     )
     print("pip spconv rc", r.returncode, r.stderr[-600:], flush=True)
+    r = sh(
+        f"PYTHONPATH={trellis_libs} python -W ignore -c 'import spconv; print(\"SPCONV_OK\", spconv.__version__)'",
+    )
+    print("spconv check:\n" + r.stdout + r.stderr[-600:], flush=True)
     # CUDA render extensions. nvdiffrast needs --no-build-isolation (its setup.py
     # requires torch visible, which build isolation hides) and diffoctreerast is cloned
     # separately by TRELLIS's setup.sh (it is NOT in the submodules dir).
