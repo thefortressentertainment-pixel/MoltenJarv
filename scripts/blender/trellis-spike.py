@@ -273,6 +273,25 @@ def main():
         print("[trellis] dense attention BACKEND -> sdpa (native torch SDPA)", flush=True)
     except Exception as _dae:
         print(f"[trellis] WARN dense-attn patch failed: {_dae}", flush=True)
+    # spconv ABI self-test: the empty-coords failure means decoder(z_s)>0 found no
+    # occupied voxels. Prime suspect is a spconv wheel whose CUDA/build ABI mismatches
+    # torch cu121 -> sparse-conv silently returns zeros. Run a tiny conv on a known
+    # tensor to catch that NOW instead of after another full pipeline run.
+    try:
+        import torch as _tc
+        import spconv.pytorch as _spc
+        _sc_test = _spc.SparseConvTensor(
+            features=_tc.ones(16, 4, dtype=_tc.float32).cuda(),
+            indices=_tc.tensor([[i, 0, 0, i] for i in range(8)] + [[i, 0, 8, i] for i in range(8)]).int().cuda(),
+            spatial_shape=[16, 16, 16], batch_size=1,
+        )
+        _sc_conv = _spc.SparseConv3d(4, 4, kernel_size=3, indice_key="jarvtest").cuda()
+        _sc_out = _sc_conv(_sc_test)
+        _sc_vals = _sc_out.features
+        print(f"[trellis] SPARSE CONV SELF-TEST: out_feats={tuple(_sc_vals.shape)} "
+              f"nonzero={int((_sc_vals != 0).sum())} absmax={float(_sc_vals.abs().max())}", flush=True)
+    except Exception as _sct:
+        print(f"[trellis] SPARSE CONV SELF-TEST FAILED: {_sct}", flush=True)
     def _local_dinov2_init(self, name):
         # NO torch.hub fallback: it pings github and would just RemoteDisconnect.
         # Fail loudly so a local DINOv2 problem is caught immediately, not after a
