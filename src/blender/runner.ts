@@ -25,7 +25,7 @@ import { loadBlenderSnapshot, renderBlenderSnapshot, saveBlenderSnapshot, loadPr
  *  - A SCOPED tool registry with only Blender-relevant tools (run_shell,
  *    file read/write, web_search, screen_capture) — tiny schema, tiny context.
  *  - NO memory search, NO RAG, NO judge, NO skill bloat in the loop.
- *  - A fresh, isolated ModelRouter pointed at the SMALL local model (qwen2.5:0.5b)
+ *  - A fresh, isolated ModelRouter pointed at the SMALL local model (qwen3.5:2b)
  *    so work happens without a big cloud/context footprint.
  *  - Sequential single-step execution with a small step budget.
  *
@@ -572,7 +572,7 @@ export async function newBlenderRouter(config: JarvGenieConfig, forceLocal = fal
   // lets callers opt into the small local model for fully-offline/quiet work.
   if (forceLocal) {
     try {
-      router.setPrimaryModel('qwen2.5:0.5b');
+      router.setPrimaryModel('qwen3.5:2b');
     } catch {
       /* keep configured primary */
     }
@@ -835,10 +835,10 @@ async function referenceHintFor(config: JarvGenieConfig, message: string): Promi
 export async function runBlenderTask(config: JarvGenieConfig, input: BlenderRunInput): Promise<BlenderRunResult> {
   const forceLocal = input.local === true;
   const router = await newBlenderRouter(config, forceLocal);
-  // Track whether we ended up on the small local model (qwen2.5:0.5b) or a cloud
+  // Track whether we ended up on the small local model (qwen3.5:2b) or the 4B
   // primary. The isolation (tiny toolset + no memory) is what prevents the wheel;
   // the model choice affects capability, not RAM-at-rest.
-  let usedLocal = forceLocal || String(input.model ?? '').includes('0.5b');
+  let usedLocal = forceLocal || String(input.model ?? '').includes('qwen3.5:2b');
   const registry = blenderToolRegistry(config);
   const tools = registry.list();
   const toolNames = tools.map((t) => t.name);
@@ -900,7 +900,7 @@ export async function runBlenderTask(config: JarvGenieConfig, input: BlenderRunI
     }
     provider = chat.provider;
     model = chat.model;
-    if (String(chat.model).includes('0.5b') || String(chat.model).includes('llama')) usedLocal = true;
+    if (String(chat.model).includes('qwen3.5:2b') || String(chat.model).includes('llama')) usedLocal = true;
     messages.push({ role: 'assistant', content: chat.content, toolCalls: chat.toolCalls ?? undefined });
 
     const textCalls = chat.toolCalls ?? extractTextToolCalls(chat.content ?? '', toolNames).map((e, i) => ({ id: `text-${i}`, name: e.name, arguments: e.args }));
